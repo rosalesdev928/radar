@@ -1,0 +1,9 @@
+﻿node_modules/
+.env
+.env.local
+dist/
+build/
+*.log
+pagina.html
+.DS_Store
+.vercel
