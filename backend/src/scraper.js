@@ -39,11 +39,14 @@ function limpiarDireccion(texto) {
 }
 async function obtenerHTML() {
   const url = `${URL_BOMBEROS}?_=${Date.now()}`;
+  console.log('[scraper] pidiendo:', url);
   const res = await fetch(url, { headers: HEADERS, cache: 'no-store' });
+  console.log('[scraper] status:', res.status);
   if (!res.ok) throw new Error(`Bomberos respondió ${res.status}`);
-  return await res.text();
+  const html = await res.text();
+  console.log('[scraper] bytes recibidos:', html.length);
+  return html;
 }
-
 /**
  * Parsea la tabla buscando la fila por su CONTENIDO, no por posición fija.
  * El N° de parte es un número de 10 dígitos que empieza con el año.
@@ -98,11 +101,22 @@ function filtrarPorDistrito(eventos, distrito = DISTRITO_OBJETIVO) {
 }
 
 async function scrapearBomberos() {
-  const html = await obtenerHTML();
-  const todos = parsearEmergencias(html);
-  return { todos, filtrados: filtrarPorDistrito(todos) };
-}
+  try {
+    const html = await obtenerHTML();
+    const todos = parsearEmergencias(html);
+    const filtrados = filtrarPorDistrito(todos);
 
+    console.log(`[scraper] filas parseadas: ${todos.length} | La Victoria: ${filtrados.length}`);
+
+    const distritos = [...new Set(todos.map((e) => e.distrito).filter(Boolean))];
+    console.log('[scraper] distritos vistos:', distritos.slice(0, 15).join(', '));
+
+    return { todos, filtrados };
+  } catch (e) {
+    console.error('[scraper] FALLO:', e.message);
+    return { todos: [], filtrados: [] };
+  }
+}
 module.exports = {
   scrapearBomberos,
   parsearEmergencias,
