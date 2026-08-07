@@ -1,6 +1,6 @@
 const cheerio = require('cheerio');
 
-const URL_BOMBEROS = 'https://sgonorte.bomberosperu.gob.pe/24horas';
+const URL_BOMBEROS = 'https://sgonorte.bomberosperu.gob.pe/24horas/';
 const DISTRITO_OBJETIVO = 'LA VICTORIA';
 
 const HEADERS = {
