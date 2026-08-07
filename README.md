@@ -4,8 +4,8 @@
 
 Construido para The Realtime Hackathon by Portal — 7 al 9 de agosto de 2026.
 
-🔗 **App:** _(URL de Vercel)_
-📺 **Demo:** _(URL del video)_
+🔗 **App:** https://radar-lovat-ten.vercel.app
+📺 **Demo:** _(URL del video)_pendiente
 
 ---
 
