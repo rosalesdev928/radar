@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Portal } from '@portalsdk/core';
 import { PortalProvider, useChannel } from '@portalsdk/react';
 import Mapa from './Mapa';
+import ChatEvento from './ChatEvento';
 import { Filtros, Listado, Estadisticas, Ajustes } from './paneles';
 import { leerUsuario, guardarUsuario, borrarUsuario, esModoApp } from './usuario';
 import { aFecha, haceCuanto } from './formato';
@@ -38,7 +39,8 @@ function Entrada({ onEntrar, instalable, onInstalar }) {
   const [nombre, setNombre] = useState('');
 
   return (
-    <div className="h-full w-full flex flex-col justify-center px-7 max-w-md mx-auto bg-[#0B1120]">
+    <div className="h-full w-full flex flex-col justify-center px-7 max-w-md mx-auto bg-[#0B1120]
+                    pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div className="dato text-[10px] tracking-[0.25em] text-[#FF3B30] mb-2">
         EMERGENCIAS 116
       </div>
@@ -95,6 +97,7 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [filtro, setFiltro] = useState('todos');
   const [mostrarCerrados, setMostrarCerrados] = useState(true);
   const [seleccionado, setSeleccionado] = useState(null);
+  const [chat, setChat] = useState(null);
 
   const metadata = useMemo(() => (usuario ? { nombre: usuario } : undefined), [usuario]);
   const opciones = useMemo(
@@ -208,7 +211,8 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
           className={`${verMapa ? 'hidden' : 'flex'} lg:flex flex-col min-h-0
                       flex-1 lg:flex-none lg:w-[400px] lg:border-r lg:border-white/10`}
         >
-          <div className="px-4 pt-4 pb-3 border-b border-white/5">{cabecera}</div>
+          <div className="px-4 pb-3 border-b border-white/5
+                          pt-[max(1rem,env(safe-area-inset-top))] lg:pt-4">{cabecera}</div>
 
           <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5">
             <div className="flex items-baseline gap-1.5">
@@ -266,11 +270,13 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
             seleccionado={seleccionado}
             onLimpiar={() => setSeleccionado(null)}
             nuevos={nuevos}
+            onAbrirChat={setChat}
           />
 
           {/* Cabecera flotante (solo móvil) */}
           <div className="lg:hidden absolute top-0 inset-x-0 z-[1000] pointer-events-none
-                          bg-[#0B1120] px-4 pt-4 pb-3">
+                          bg-[#0B1120] px-4 pb-3
+                          pt-[max(1rem,env(safe-area-inset-top))]">
             {cabecera}
           </div>
 
@@ -281,8 +287,18 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
         </main>
       </div>
 
+      {/* ----- Hilo del evento ----- */}
+      {chat && (
+        <ChatEvento
+          evento={chat}
+          usuario={usuario}
+          onCerrar={() => setChat(null)}
+        />
+      )}
+
       {/* ----- Navegación móvil ----- */}
-      <nav className="lg:hidden shrink-0 h-14 bg-[#0B1120] border-t border-white/10 flex">
+      <nav className="lg:hidden shrink-0 h-14 bg-[#0B1120] border-t border-white/10 flex
+                      pb-[env(safe-area-inset-bottom)] box-content">
         {SECCIONES.map((s) => (
           <button
             key={s.id}
