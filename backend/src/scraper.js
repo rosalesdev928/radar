@@ -39,13 +39,22 @@ function limpiarDireccion(texto) {
 }
 async function obtenerHTML() {
   const url = `${URL_BOMBEROS}?_=${Date.now()}`;
-  console.log('[scraper] pidiendo:', url);
-  const res = await fetch(url, { headers: HEADERS, cache: 'no-store' });
-  console.log('[scraper] status:', res.status);
-  if (!res.ok) throw new Error(`Bomberos respondió ${res.status}`);
-  const html = await res.text();
-  console.log('[scraper] bytes recibidos:', html.length);
-  return html;
+  const ctrl = new AbortController();
+  const corte = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(url, {
+      headers: HEADERS,
+      cache: 'no-store',
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`Bomberos respondió ${res.status}`);
+    return await res.text();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Bomberos no respondió en 15s');
+    throw e;
+  } finally {
+    clearTimeout(corte);
+  }
 }
 /**
  * Parsea la tabla buscando la fila por su CONTENIDO, no por posición fija.

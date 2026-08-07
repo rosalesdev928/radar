@@ -13,13 +13,115 @@ const VEREDICTOS = {
   ruido:         { texto: 'Sin información útil', color: '#7C8AA0' },
 };
 
+/* ---------- Votación rápida ---------- */
+const OPCIONES_VOTO = [
+  {
+    clave: 'confirmo',
+    texto: 'Lo confirmo',
+    color: '#22C55E',
+    glifo: <path d="M20 6L9 17l-5-5" />,
+  },
+  {
+    clave: 'nada',
+    texto: 'No veo nada',
+    color: '#FFB020',
+    glifo: <><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></>,
+  },
+  {
+    clave: 'termino',
+    texto: 'Ya terminó',
+    color: '#7C8AA0',
+    glifo: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  },
+];
+
+/**
+ * Un voto por persona: recorremos en orden y el último gana.
+ * Portal serializa las escrituras por canal, así que el orden es fiable.
+ */
+function contarVotos(mensajes) {
+  const porPersona = new Map();
+
+  for (const m of mensajes) {
+    const v = m.content?.voto;
+    if (!v || !m.sender) continue;
+    porPersona.set(m.sender, v);
+  }
+
+  const conteo = { confirmo: 0, nada: 0, termino: 0 };
+  for (const v of porPersona.values()) {
+    if (v in conteo) conteo[v]++;
+  }
+
+  return { conteo, porPersona, total: porPersona.size };
+}
+
+function BarraVotos({ conteo, miVoto, listos, onVotar }) {
+  return (
+    <div className="px-4 pt-3">
+      <div className="grid grid-cols-3 gap-1.5">
+        {OPCIONES_VOTO.map((o) => {
+          const activo = miVoto === o.clave;
+          const n = conteo[o.clave] ?? 0;
+
+          return (
+            <button
+              key={o.clave}
+              onClick={() => onVotar(o.clave)}
+              disabled={!listos}
+              className={`flex flex-col items-center gap-1 py-2 rounded-xl border transition
+                          disabled:opacity-40 ${
+                            activo
+                              ? 'bg-white/[0.09] border-white/25'
+                              : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08]'
+                          }`}
+              style={activo ? { borderColor: o.color } : undefined}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={activo ? o.color : '#7C8AA0'}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-[15px] h-[15px]"
+              >
+                {o.glifo}
+              </svg>
+              <span
+                className="text-[10.5px] leading-none"
+                style={{ color: activo ? o.color : '#94A3B8' }}
+              >
+                {o.texto}
+              </span>
+              <span
+                className="dato text-[11px] font-bold leading-none"
+                style={{ color: n > 0 ? (activo ? o.color : '#CBD5E1') : '#4A5568' }}
+              >
+                {n}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {miVoto && (
+        <p className="dato text-[9px] text-[#4A5568] text-center mt-1.5">
+          tu voto se puede cambiar en cualquier momento
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Lectura del hilo por IA ---------- */
-function Analisis({ evento, mensajes }) {
+function Analisis({ evento, mensajes, votos }) {
   const [cargando, setCargando] = useState(false);
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
 
   const utiles = mensajes.filter((m) => m.content?.texto).length;
+  const totalVotos = (votos?.confirmo ?? 0) + (votos?.nada ?? 0) + (votos?.termino ?? 0);
 
   async function analizar() {
     setCargando(true);
@@ -30,6 +132,7 @@ function Analisis({ evento, mensajes }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           evento,
+          votos,
           mensajes: mensajes
             .filter((m) => m.content?.texto)
             .map((m) => ({ texto: m.content.texto, nombre: m.content.nombre })),
@@ -45,7 +148,13 @@ function Analisis({ evento, mensajes }) {
     }
   }
 
-  if (utiles < 2) return null;
+  // Basta con dos reportes escritos, o con tres personas que hayan votado
+  if (utiles < 2 && totalVotos < 3) return null;
+
+  const etiquetaBoton =
+    utiles >= 2
+      ? `Resumir estos ${utiles} reportes`
+      : `Leer ${totalVotos} señales de vecinos`;
 
   if (!datos) {
     return (
@@ -61,7 +170,7 @@ function Analisis({ evento, mensajes }) {
                strokeLinecap="round" strokeLinejoin="round" className="w-[15px] h-[15px]">
             <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3z" />
           </svg>
-          {cargando ? 'Leyendo el hilo…' : `Resumir estos ${utiles} reportes`}
+          {cargando ? 'Leyendo el hilo…' : etiquetaBoton}
         </button>
         {error && (
           <p className="text-[11px] text-amber-400/90 mt-1.5 text-center">{error}</p>
@@ -101,6 +210,7 @@ function Analisis({ evento, mensajes }) {
         <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/[0.07]">
           <span className="dato text-[9px] text-[#4A5568]">
             leído por IA · {datos.mensajes_analizados ?? utiles} mensajes
+            {totalVotos > 0 && ` · ${totalVotos} votos`}
           </span>
           <button
             onClick={() => setDatos(null)}
@@ -178,10 +288,18 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
   const listos = status === 'ready';
   const viendo = presence?.count ?? 0;
 
+  /* Votos y conversación viven en el mismo canal; los separamos aquí */
+  const { conteo, porPersona } = useMemo(() => contarVotos(messages), [messages]);
+  const conversacion = useMemo(
+    () => messages.filter((m) => m.content?.texto),
+    [messages]
+  );
+  const miVoto = me?.id ? porPersona.get(me.id) ?? null : null;
+
   /* Auto-scroll al último mensaje */
   useEffect(() => {
     finRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.length, typing.length]);
+  }, [conversacion.length, typing.length]);
 
   /* Foco al abrir (solo escritorio, en móvil el teclado tapa el mapa) */
   useEffect(() => {
@@ -200,6 +318,17 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
   if (!evento) return null;
 
   const color = COLORES[evento.tipo] ?? COLORES.otro;
+
+  async function votar(clave) {
+    if (!listos) return;
+    // Pulsar el voto que ya tienes lo retira
+    const valor = miVoto === clave ? 'ninguno' : clave;
+    try {
+      await send({ content: { voto: valor, nombre: usuario || null } });
+    } catch {
+      /* si falla, el conteo simplemente no cambia */
+    }
+  }
 
   async function enviar() {
     const limpio = texto.trim();
@@ -283,11 +412,18 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
           </div>
         </header>
 
-        <Analisis evento={evento} mensajes={messages} />
+        <BarraVotos
+          conteo={conteo}
+          miVoto={miVoto}
+          listos={listos}
+          onVotar={votar}
+        />
+
+        <Analisis evento={evento} mensajes={messages} votos={conteo} />
 
         {/* Mensajes */}
         <div className="flex-1 overflow-y-auto min-h-0 px-4 py-3 flex flex-col gap-2.5">
-          {!messages.length && listos && (
+          {!conversacion.length && listos && (
             <div className="flex-1 grid place-items-center text-center px-6">
               <div>
                 <p className="text-[13px] text-[#7C8AA0] leading-relaxed">
@@ -301,7 +437,7 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
             </div>
           )}
 
-          {messages.map((m) => (
+          {conversacion.map((m) => (
             <Burbuja key={m.id} msg={m} propio={me?.id && m.sender === me.id} />
           ))}
 

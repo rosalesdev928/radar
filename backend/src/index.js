@@ -102,6 +102,17 @@ app.use((req, res, next) => {
 // Cache de analisis por evento: evita re-analizar el mismo hilo sin cambios
 const analisis = new Map();
 
+/** Firma del estado del hilo: si no cambia, no volvemos a llamar a la IA. */
+function firmaDelHilo(mensajes, votos) {
+  const v = votos ?? {};
+  return [
+    mensajes.length,
+    v.confirmo | 0,
+    v.nada | 0,
+    v.termino | 0,
+  ].join(':');
+}
+
 app.get('/', (_, res) => {
   const distritos = [...new Set([...cache.values()].map((e) => e.distrito))];
   res.json({
@@ -126,10 +137,11 @@ app.get('/eventos', (req, res) => {
 
 /**
  * Analiza el hilo ciudadano de un evento y lo contrasta con el parte oficial.
- * El frontend manda los mensajes porque ya los tiene en memoria via Portal.
+ * El frontend manda los mensajes y el conteo de votos porque ya los tiene
+ * en memoria via Portal.
  */
 app.post('/analizar', async (req, res) => {
-  const { evento, mensajes } = req.body ?? {};
+  const { evento, mensajes, votos } = req.body ?? {};
 
   if (!evento?.id || !Array.isArray(mensajes)) {
     return res.status(400).json({ error: 'Faltan evento o mensajes' });
@@ -142,15 +154,16 @@ app.post('/analizar', async (req, res) => {
     });
   }
 
-  // Si el hilo no cambio desde el ultimo analisis, devolvemos el guardado
+  // Si ni los mensajes ni los votos cambiaron, devolvemos el analisis guardado
+  const firma = firmaDelHilo(mensajes, votos);
   const previo = analisis.get(evento.id);
-  if (previo && previo.total === mensajes.length) {
+  if (previo && previo.firma === firma) {
     return res.json({ ...previo.resultado, _cacheado: true });
   }
 
   try {
-    const resultado = await analizarHilo({ evento, mensajes }, CONFIG.ia);
-    analisis.set(evento.id, { total: mensajes.length, resultado });
+    const resultado = await analizarHilo({ evento, mensajes, votos }, CONFIG.ia);
+    analisis.set(evento.id, { firma, resultado });
     res.json(resultado);
   } catch (err) {
     console.error(`[analizar ${evento.id}] ✗ ${err.message}`);

@@ -1,9 +1,10 @@
 const SYSTEM_PROMPT = `Eres el analista de verificación cruzada de Radar, un mapa de emergencias en tiempo real para Lima Metropolitana, Perú.
 
 CONTEXTO
-Recibirás dos cosas:
+Recibirás tres cosas:
 1. Un PARTE OFICIAL del Cuerpo General de Bomberos del Perú. Es la fuente autoritativa: lo que dice es cierto.
 2. Un HILO CIUDADANO: mensajes escritos por vecinos que dicen estar cerca del lugar. Es texto libre, informal, con faltas de ortografía, y puede contener ruido, bromas, o gente que no está realmente ahí.
+3. Una VOTACIÓN: conteo de botones que los vecinos pulsaron sobre este incidente.
 
 TU TAREA
 Leer el hilo y decirle a alguien que llega nuevo qué está pasando realmente, sin que tenga que leer 30 mensajes.
@@ -22,6 +23,19 @@ Específicamente:
 3. DATOS NUEVOS — array de strings cortos (máx 12 palabras cada uno) con información concreta que los ciudadanos aportan y el parte oficial NO contiene. Si no hay ninguno, array vacío.
 
 4. CONFIANZA — "alta", "media" o "baja", según cuántas personas distintas coinciden y qué tan específicos son.
+
+CÓMO USAR LA VOTACIÓN
+El objeto "votacion" trae tres contadores, uno por persona:
+   - confirmo: vecinos que dicen ver el incidente
+   - nada: vecinos que dicen no ver nada en ese lugar
+   - termino: vecinos que dicen que ya se resolvió
+
+Reglas para interpretarlos:
+- Un voto NO es evidencia por sí solo. Un botón no describe nada; el texto sí. El voto solo modula la confianza de lo que ya dice el texto.
+- Votos "confirmo" ALTOS + texto con detalles concretos y distintos entre sí (ángulos, calles, cantidades) → sube la confianza.
+- Votos "confirmo" ALTOS pero NADIE describe nada concreto → NO subas la confianza. Puede ser gente pulsando porque vio que otros pulsaron. Menciónalo explícitamente en el resumen.
+- Mayoría en "nada" o en "termino" contra un parte que sigue "en curso" → veredicto "contradictorio".
+- Menos de 3 votos totales: es una muestra demasiado chica. Ignóralos y decide solo por el texto.
 
 REGLAS DURAS
 - No inventes. Si el hilo no dice algo, no lo afirmes.
@@ -52,10 +66,24 @@ function prepararHilo(mensajes = []) {
     }));
 }
 
-async function analizarHilo({ evento, mensajes }, { apiKey, modelo }) {
-  const hilo = prepararHilo(mensajes);
+/** Normaliza el conteo de votos que manda el frontend. */
+function prepararVotos(votos) {
+  const n = (x) => (Number.isFinite(x) && x > 0 ? Math.floor(x) : 0);
+  const limpio = {
+    confirmo: n(votos?.confirmo),
+    nada: n(votos?.nada),
+    termino: n(votos?.termino),
+  };
+  limpio.total = limpio.confirmo + limpio.nada + limpio.termino;
+  return limpio;
+}
 
-  if (hilo.length < 2) {
+async function analizarHilo({ evento, mensajes, votos }, { apiKey, modelo }) {
+  const hilo = prepararHilo(mensajes);
+  const votacion = prepararVotos(votos);
+
+  // Sin texto suficiente y sin masa crítica de votos, no vale gastar una llamada
+  if (hilo.length < 2 && votacion.total < 3) {
     return {
       veredicto: 'sin_confirmar',
       resumen: 'Todavía no hay suficientes reportes para analizar.',
@@ -76,6 +104,7 @@ async function analizarHilo({ evento, mensajes }, { apiKey, modelo }) {
       hora: evento?.hora,
     },
     hilo_ciudadano: hilo,
+    votacion,
   };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -115,6 +144,7 @@ async function analizarHilo({ evento, mensajes }, { apiKey, modelo }) {
     confianza: salida.confianza ?? 'baja',
     personas: salida.personas ?? new Set(hilo.map((m) => m.autor)).size,
     mensajes_analizados: hilo.length,
+    votos_analizados: votacion.total,
   };
 }
 
