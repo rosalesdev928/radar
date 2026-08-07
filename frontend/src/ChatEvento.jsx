@@ -3,6 +3,116 @@ import { useChannel } from '@portalsdk/react';
 import { COLORES, ETIQUETAS } from './iconos';
 
 const LIMITE = 240;
+const BACKEND = import.meta.env.VITE_BACKEND_URL;
+
+const VEREDICTOS = {
+  corroborado:   { texto: 'Corroborado por vecinos', color: '#22C55E' },
+  ampliado:      { texto: 'Vecinos aportan datos nuevos', color: '#35A7FF' },
+  contradictorio:{ texto: 'Contradice el parte oficial', color: '#FFB020' },
+  sin_confirmar: { texto: 'Sin confirmar', color: '#7C8AA0' },
+  ruido:         { texto: 'Sin información útil', color: '#7C8AA0' },
+};
+
+/* ---------- Lectura del hilo por IA ---------- */
+function Analisis({ evento, mensajes }) {
+  const [cargando, setCargando] = useState(false);
+  const [datos, setDatos] = useState(null);
+  const [error, setError] = useState(null);
+
+  const utiles = mensajes.filter((m) => m.content?.texto).length;
+
+  async function analizar() {
+    setCargando(true);
+    setError(null);
+    try {
+      const r = await fetch(`${BACKEND}/analizar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          evento,
+          mensajes: mensajes
+            .filter((m) => m.content?.texto)
+            .map((m) => ({ texto: m.content.texto, nombre: m.content.nombre })),
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.mensaje || 'No se pudo analizar el hilo');
+      setDatos(j);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  if (utiles < 2) return null;
+
+  if (!datos) {
+    return (
+      <div className="px-4 pt-3">
+        <button
+          onClick={analizar}
+          disabled={cargando}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+                     bg-white/[0.06] hover:bg-white/[0.11] border border-white/10
+                     text-[12.5px] text-slate-200 transition disabled:opacity-50"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
+               strokeLinecap="round" strokeLinejoin="round" className="w-[15px] h-[15px]">
+            <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3z" />
+          </svg>
+          {cargando ? 'Leyendo el hilo…' : `Resumir estos ${utiles} reportes`}
+        </button>
+        {error && (
+          <p className="text-[11px] text-amber-400/90 mt-1.5 text-center">{error}</p>
+        )}
+      </div>
+    );
+  }
+
+  const v = VEREDICTOS[datos.veredicto] ?? VEREDICTOS.sin_confirmar;
+
+  return (
+    <div className="px-4 pt-3">
+      <div className="rounded-xl border border-white/10 bg-[#131C2C] p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: v.color }} />
+          <span className="display text-[11px] font-bold" style={{ color: v.color }}>
+            {v.texto}
+          </span>
+          <span className="dato text-[9px] text-[#4A5568] ml-auto">
+            confianza {datos.confianza}
+          </span>
+        </div>
+
+        <p className="text-[12.5px] text-slate-200 leading-snug">{datos.resumen}</p>
+
+        {datos.datos_nuevos?.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {datos.datos_nuevos.map((d, i) => (
+              <li key={i} className="flex gap-1.5 text-[11.5px] text-slate-300">
+                <span className="text-[#35A7FF] shrink-0">+</span>
+                {d}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/[0.07]">
+          <span className="dato text-[9px] text-[#4A5568]">
+            leído por IA · {datos.mensajes_analizados ?? utiles} mensajes
+          </span>
+          <button
+            onClick={() => setDatos(null)}
+            className="dato text-[9px] text-[#7C8AA0] hover:text-slate-300 transition"
+          >
+            volver a leer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Canal dedicado al hilo de un parte. 'radar:chat:2026027042' */
 export function canalDeEvento(id) {
@@ -172,6 +282,8 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
             </span>
           </div>
         </header>
+
+        <Analisis evento={evento} mensajes={messages} />
 
         {/* Mensajes */}
         <div className="flex-1 overflow-y-auto min-h-0 px-4 py-3 flex flex-col gap-2.5">

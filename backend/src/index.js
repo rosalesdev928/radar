@@ -5,6 +5,7 @@ const { scrapearBomberos } = require('./scraper');
 const { DetectorDeCambios } = require('./detector');
 const { PortalPublisher } = require('./portal');
 const { clasificar } = require('./agente');
+const { analizarHilo } = require('./analista');
 const { esDeLima, slug, normalizar } = require('./distritos');
 
 const CIUDAD = process.env.CIUDAD || 'radar';
@@ -88,10 +89,18 @@ async function ejecutarCiclo() {
 }
 
 const app = express();
-app.use((_, res, next) => {
+app.use(express.json({ limit: '256kb' }));
+
+app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+// Cache de analisis por evento: evita re-analizar el mismo hilo sin cambios
+const analisis = new Map();
 
 app.get('/', (_, res) => {
   const distritos = [...new Set([...cache.values()].map((e) => e.distrito))];
@@ -113,6 +122,40 @@ app.get('/eventos', (req, res) => {
     eventos = eventos.filter((e) => normalizar(e.distrito) === normalizar(distrito));
   }
   res.json(eventos);
+});
+
+/**
+ * Analiza el hilo ciudadano de un evento y lo contrasta con el parte oficial.
+ * El frontend manda los mensajes porque ya los tiene en memoria via Portal.
+ */
+app.post('/analizar', async (req, res) => {
+  const { evento, mensajes } = req.body ?? {};
+
+  if (!evento?.id || !Array.isArray(mensajes)) {
+    return res.status(400).json({ error: 'Faltan evento o mensajes' });
+  }
+
+  if (!CONFIG.ia.aiEnabled || !CONFIG.ia.apiKey) {
+    return res.status(503).json({
+      error: 'ia_apagada',
+      mensaje: 'El analisis con IA no esta activo en este momento.',
+    });
+  }
+
+  // Si el hilo no cambio desde el ultimo analisis, devolvemos el guardado
+  const previo = analisis.get(evento.id);
+  if (previo && previo.total === mensajes.length) {
+    return res.json({ ...previo.resultado, _cacheado: true });
+  }
+
+  try {
+    const resultado = await analizarHilo({ evento, mensajes }, CONFIG.ia);
+    analisis.set(evento.id, { total: mensajes.length, resultado });
+    res.json(resultado);
+  } catch (err) {
+    console.error(`[analizar ${evento.id}] ✗ ${err.message}`);
+    res.status(502).json({ error: 'fallo_ia', mensaje: err.message });
+  }
 });
 
 app.get('/salud', (_, res) => res.json({ ok: true }));
