@@ -1,4 +1,5 @@
 import { COLORES, ETIQUETAS, svgDe } from './iconos';
+import { DISTRITOS } from './alertas';
 import { ABREV, fechaHora } from './formato';
 
 const TIPOS = [
@@ -244,6 +245,23 @@ function Tarjeta({ valor, etiqueta, color }) {
 }
 
 /* ---------- Ajustes ---------- */
+
+function Interruptor({ activo }) {
+  return (
+    <span
+      className={`w-9 h-5 rounded-full transition relative shrink-0 ${
+        activo ? 'bg-emerald-500' : 'bg-[#2A3547]'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+          activo ? 'left-[18px]' : 'left-0.5'
+        }`}
+      />
+    </span>
+  );
+}
+
 export function Ajustes({
   usuario,
   onSalir,
@@ -251,7 +269,15 @@ export function Ajustes({
   onToggleCerrados,
   instalable,
   onInstalar,
+  miDistrito,
+  onCambiarDistrito,
+  alertas,
+  onToggleAlertas,
+  permiso,
 }) {
+  const bloqueado = permiso === 'denied';
+  const sinSoporte = permiso === 'no-soportado';
+
   return (
     <div className="px-4 py-4 space-y-5">
       <div>
@@ -264,6 +290,73 @@ export function Ajustes({
         </div>
       </div>
 
+      {/* ----- Mi zona ----- */}
+      <div>
+        <h3 className="display text-[12px] text-[#7C8AA0] mb-2">Mi zona</h3>
+
+        <div className="bg-[#161F2F] rounded-xl px-4 py-3">
+          <label className="text-[13.5px] block mb-2">Distrito donde estoy</label>
+          <select
+            value={miDistrito || ''}
+            onChange={(e) => onCambiarDistrito(e.target.value || null)}
+            className="w-full bg-[#0B1120] border border-white/10 rounded-lg px-3 py-2.5
+                       text-[13.5px] outline-none focus:border-[#FF3B30]/60 transition
+                       appearance-none cursor-pointer"
+          >
+            <option value="">Sin elegir</option>
+            {DISTRITOS.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-[#7C8AA0] leading-relaxed mt-2">
+            Seguirás viendo toda Lima en el mapa. Esto solo decide de qué zona
+            te avisamos.
+          </p>
+        </div>
+
+        <button
+          onClick={onToggleAlertas}
+          disabled={!miDistrito || bloqueado || sinSoporte}
+          className="w-full bg-[#161F2F] rounded-xl px-4 py-3 mt-2 flex items-center
+                     justify-between disabled:opacity-45"
+        >
+          <span className="text-[13.5px] text-left">
+            Avisarme de emergencias aquí
+          </span>
+          <Interruptor activo={alertas} />
+        </button>
+
+        {sinSoporte && (
+          <p className="text-[11px] text-[#7C8AA0] mt-1.5 px-1 leading-relaxed">
+            Este navegador no admite notificaciones. El aviso aparecerá igual
+            dentro de la app.
+          </p>
+        )}
+
+        {bloqueado && (
+          <p className="text-[11px] text-amber-400/90 mt-1.5 px-1 leading-relaxed">
+            Bloqueaste las notificaciones para este sitio. Habilítalas desde el
+            candado de la barra de direcciones para reactivarlas.
+          </p>
+        )}
+
+        {!miDistrito && !bloqueado && !sinSoporte && (
+          <p className="text-[11px] text-[#4A5568] mt-1.5 px-1">
+            Elige tu distrito para activar los avisos.
+          </p>
+        )}
+
+        {alertas && miDistrito && (
+          <p className="text-[11px] text-emerald-400/80 mt-1.5 px-1 leading-relaxed">
+            Te avisaremos cuando entre una emergencia en {miDistrito}. Funciona
+            con la app abierta o en segundo plano.
+          </p>
+        )}
+      </div>
+
+      {/* ----- Mapa ----- */}
       <div>
         <h3 className="display text-[12px] text-[#7C8AA0] mb-2">Mapa</h3>
         <button
@@ -271,17 +364,7 @@ export function Ajustes({
           className="w-full bg-[#161F2F] rounded-xl px-4 py-3 flex items-center justify-between"
         >
           <span className="text-[13.5px] text-left">Mostrar emergencias cerradas</span>
-          <span
-            className={`w-9 h-5 rounded-full transition relative shrink-0 ${
-              mostrarCerrados ? 'bg-emerald-500' : 'bg-[#2A3547]'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                mostrarCerrados ? 'left-[18px]' : 'left-0.5'
-              }`}
-            />
-          </span>
+          <Interruptor activo={mostrarCerrados} />
         </button>
       </div>
 

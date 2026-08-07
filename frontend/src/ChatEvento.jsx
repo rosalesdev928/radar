@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChannel } from '@portalsdk/react';
 import { COLORES, ETIQUETAS } from './iconos';
+import { idDispositivo } from './usuario';
 
 const LIMITE = 240;
 const BACKEND = import.meta.env.VITE_BACKEND_URL;
@@ -36,24 +37,30 @@ const OPCIONES_VOTO = [
 ];
 
 /**
- * Un voto por persona: recorremos en orden y el último gana.
+ * Un voto por dispositivo: recorremos en orden y el último gana.
  * Portal serializa las escrituras por canal, así que el orden es fiable.
+ *
+ * Agrupamos por el id que guarda el propio navegador y NO por m.sender,
+ * porque Portal puede dar un sender distinto en cada reconexión y eso
+ * hacía que un mismo usuario contara varias veces.
  */
 function contarVotos(mensajes) {
-  const porPersona = new Map();
+  const porDispositivo = new Map();
 
   for (const m of mensajes) {
     const v = m.content?.voto;
-    if (!v || !m.sender) continue;
-    porPersona.set(m.sender, v);
+    const d = m.content?.dispositivo;
+    // Los votos antiguos sin dispositivo se ignoran: no se pueden deduplicar
+    if (!v || !d) continue;
+    porDispositivo.set(d, v);
   }
 
   const conteo = { confirmo: 0, nada: 0, termino: 0 };
-  for (const v of porPersona.values()) {
+  for (const v of porDispositivo.values()) {
     if (v in conteo) conteo[v]++;
   }
 
-  return { conteo, porPersona, total: porPersona.size };
+  return { conteo, porDispositivo };
 }
 
 function BarraVotos({ conteo, miVoto, listos, onVotar }) {
@@ -288,13 +295,17 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
   const listos = status === 'ready';
   const viendo = presence?.count ?? 0;
 
+  /* Identidad estable de este navegador, para no contar votos repetidos */
+  const miDispositivo = useMemo(() => idDispositivo(), []);
+
   /* Votos y conversación viven en el mismo canal; los separamos aquí */
-  const { conteo, porPersona } = useMemo(() => contarVotos(messages), [messages]);
+  const { conteo, porDispositivo } = useMemo(() => contarVotos(messages), [messages]);
   const conversacion = useMemo(
     () => messages.filter((m) => m.content?.texto),
     [messages]
   );
-  const miVoto = me?.id ? porPersona.get(me.id) ?? null : null;
+  const votoCrudo = porDispositivo.get(miDispositivo) ?? null;
+  const miVoto = votoCrudo && votoCrudo !== 'ninguno' ? votoCrudo : null;
 
   /* Auto-scroll al último mensaje */
   useEffect(() => {
@@ -324,7 +335,13 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
     // Pulsar el voto que ya tienes lo retira
     const valor = miVoto === clave ? 'ninguno' : clave;
     try {
-      await send({ content: { voto: valor, nombre: usuario || null } });
+      await send({
+        content: {
+          voto: valor,
+          dispositivo: miDispositivo,
+          nombre: usuario || null,
+        },
+      });
     } catch {
       /* si falla, el conteo simplemente no cambia */
     }

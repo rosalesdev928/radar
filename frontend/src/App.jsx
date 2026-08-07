@@ -4,7 +4,18 @@ import { PortalProvider, useChannel } from '@portalsdk/react';
 import Mapa from './Mapa';
 import ChatEvento from './ChatEvento';
 import { Filtros, Listado, Estadisticas, Ajustes } from './paneles';
+import { COLORES, ETIQUETAS } from './iconos';
 import { leerUsuario, guardarUsuario, borrarUsuario, esModoApp } from './usuario';
+import {
+  leerDistrito,
+  guardarDistrito,
+  leerAlertas,
+  guardarAlertas,
+  estadoPermiso,
+  pedirPermiso,
+  notificar,
+  normalizar,
+} from './alertas';
 import { aFecha, haceCuanto } from './formato';
 
 const CANAL = import.meta.env.VITE_PORTAL_CHANNEL;
@@ -91,6 +102,71 @@ function Entrada({ onEntrar, instalable, onInstalar }) {
   );
 }
 
+/* ---------- Aviso de emergencia cercana ---------- */
+function AvisoCercano({ aviso, onAbrir, onCerrar }) {
+  if (!aviso) return null;
+
+  const { evento, extras } = aviso;
+  const color = COLORES[evento.tipo] ?? COLORES.otro;
+
+  return (
+    <div
+      className="aviso-cercano fixed z-[1600] inset-x-3 mx-auto max-w-[420px]
+                 top-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))]"
+    >
+      <div
+        className="rounded-2xl border bg-[#131C2C]/95 backdrop-blur-md shadow-2xl
+                   shadow-black/60 overflow-hidden"
+        style={{ borderColor: `${color}55` }}
+      >
+        <div className="h-[3px] w-full" style={{ background: color }} />
+
+        <div className="px-4 py-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span
+              className="w-1.5 h-1.5 rounded-full animate-pulse shrink-0"
+              style={{ background: color }}
+            />
+            <span className="display text-[10.5px] font-bold tracking-wide" style={{ color }}>
+              {ETIQUETAS[evento.tipo] ?? 'Emergencia'} en tu zona
+            </span>
+            <button
+              onClick={onCerrar}
+              className="ml-auto -mr-1 w-7 h-7 grid place-items-center rounded-full
+                         text-[#7C8AA0] hover:text-white hover:bg-white/5 transition"
+              aria-label="Cerrar aviso"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                   strokeLinecap="round" className="w-[15px] h-[15px]">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <p className="text-[13.5px] text-slate-100 leading-snug">
+            {evento.descripcion}
+          </p>
+
+          <p className="dato text-[10px] text-[#7C8AA0] mt-1">
+            {evento.distrito}
+            {evento.detalle_unidades ? ` · ${evento.detalle_unidades}` : ''}
+            {extras > 0 && ` · y ${extras} más`}
+          </p>
+
+          <button
+            onClick={() => onAbrir(evento)}
+            className="w-full mt-2.5 py-2 rounded-lg text-[12.5px] font-medium transition
+                       bg-white/[0.07] hover:bg-white/[0.13] border border-white/10
+                       text-slate-100"
+          >
+            Ver en el mapa
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Vista principal ---------- */
 function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [seccion, setSeccion] = useState('mapa');
@@ -98,6 +174,12 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [mostrarCerrados, setMostrarCerrados] = useState(true);
   const [seleccionado, setSeleccionado] = useState(null);
   const [chat, setChat] = useState(null);
+
+  /* Preferencias de aviso por zona */
+  const [miDistrito, setMiDistrito] = useState(() => leerDistrito());
+  const [alertas, setAlertas] = useState(() => leerAlertas());
+  const [permiso, setPermiso] = useState(() => estadoPermiso());
+  const [aviso, setAviso] = useState(null);
 
   const metadata = useMemo(() => (usuario ? { nombre: usuario } : undefined), [usuario]);
   const opciones = useMemo(
@@ -119,6 +201,12 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [nuevos, setNuevos] = useState(new Set());
   const [, setTick] = useState(0);
 
+  /* Leemos las preferencias por ref para no reejecutar el diff de eventos */
+  const prefs = useRef({ distrito: null, alertas: false });
+  useEffect(() => {
+    prefs.current = { distrito: miDistrito, alertas };
+  }, [miDistrito, alertas]);
+
   useEffect(() => {
     const ids = new Set(eventos.map((e) => e.id));
 
@@ -132,6 +220,29 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
 
     if (recien.length) {
       setNuevos(new Set(recien));
+
+      /* ¿Alguno cayó en el distrito del usuario? */
+      const { distrito, alertas: activas } = prefs.current;
+      if (activas && distrito) {
+        const cerca = eventos.filter(
+          (e) => recien.includes(e.id) && normalizar(e.distrito) === normalizar(distrito)
+        );
+
+        if (cerca.length) {
+          const principal = cerca[0];
+          setAviso({ evento: principal, extras: cerca.length - 1 });
+
+          notificar({
+            titulo:
+              cerca.length > 1
+                ? `${cerca.length} emergencias en ${distrito}`
+                : `Emergencia en ${distrito}`,
+            cuerpo: principal.descripcion,
+            tag: `radar-${principal.id}`,
+          });
+        }
+      }
+
       const t = setTimeout(() => setNuevos(new Set()), 9000);
       return () => clearTimeout(t);
     }
@@ -141,6 +252,36 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     const i = setInterval(() => setTick((v) => v + 1), 20000);
     return () => clearInterval(i);
   }, []);
+
+  /* El aviso se retira solo a los 14 s */
+  useEffect(() => {
+    if (!aviso) return;
+    const t = setTimeout(() => setAviso(null), 14000);
+    return () => clearTimeout(t);
+  }, [aviso]);
+
+  /* Al activar los avisos pedimos permiso: va dentro de un clic del usuario */
+  async function alternarAlertas() {
+    if (alertas) {
+      setAlertas(false);
+      guardarAlertas(false);
+      return;
+    }
+    const res = await pedirPermiso();
+    setPermiso(res);
+    const ok = res === 'granted' || res === 'no-soportado';
+    setAlertas(ok);
+    guardarAlertas(ok);
+  }
+
+  function cambiarDistrito(d) {
+    setMiDistrito(d);
+    guardarDistrito(d);
+    if (!d) {
+      setAlertas(false);
+      guardarAlertas(false);
+    }
+  }
 
   const ultimo = eventos.length ? haceCuanto(aFecha(eventos[0].hora)) : null;
 
@@ -253,6 +394,11 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
                 onToggleCerrados={() => setMostrarCerrados((v) => !v)}
                 instalable={instalable}
                 onInstalar={onInstalar}
+                miDistrito={miDistrito}
+                onCambiarDistrito={cambiarDistrito}
+                alertas={alertas}
+                onToggleAlertas={alternarAlertas}
+                permiso={permiso}
               />
             )}
             {verMapa && (
@@ -286,6 +432,16 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
           </div>
         </main>
       </div>
+
+      {/* ----- Aviso de emergencia cercana ----- */}
+      <AvisoCercano
+        aviso={aviso}
+        onCerrar={() => setAviso(null)}
+        onAbrir={(e) => {
+          irAlMapa(e);
+          setAviso(null);
+        }}
+      />
 
       {/* ----- Hilo del evento ----- */}
       {chat && (
