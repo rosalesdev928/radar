@@ -10,6 +10,7 @@ const { RegistroDeSuscripciones } = require('./suscripciones');
 const { Avisador } = require('./avisos');
 const { Vigilante } = require('./vigilante');
 const { crearCors, crearLimitador, Presupuesto } = require('./limites');
+const { responderVoz } = require('./voz');
 const { esDeLima, slug, normalizar } = require('./distritos');
 
 const CIUDAD = process.env.CIUDAD || 'radar';
@@ -142,6 +143,7 @@ app.use(
    estrechos para un bucle automatizado. */
 const limiteAnalisis = crearLimitador({ capacidad: 6, porMinuto: 3, nombre: '/analizar' });
 const limiteToken = crearLimitador({ capacidad: 10, porMinuto: 5, nombre: '/token' });
+const limiteVoz = crearLimitador({ capacidad: 5, porMinuto: 2, nombre: '/voz' });
 const presupuesto = new Presupuesto({
   porHora: parseInt(process.env.IA_LLAMADAS_POR_HORA || '60', 10),
 });
@@ -318,6 +320,60 @@ app.post('/suscribir', async (req, res) => {
   } catch (err) {
     console.error(`[suscribir] ✗ ${err.message}`);
     res.status(500).json({ error: 'no_se_pudo_registrar' });
+  }
+});
+
+/**
+ * Consulta hablada.
+ *
+ * El frontend transcribe con el reconocimiento de voz del navegador, calcula
+ * qué eventos tiene cerca y manda solo eso: la posición del usuario no llega
+ * al servidor, únicamente las distancias ya resueltas.
+ */
+app.post('/voz', limiteVoz, async (req, res) => {
+  const { pregunta, cercanos, contexto } = req.body ?? {};
+
+  if (typeof pregunta !== 'string' || !pregunta.trim()) {
+    return res.status(400).json({ error: 'falta_pregunta' });
+  }
+
+  if (!CONFIG.ia.aiEnabled || !CONFIG.ia.apiKey) {
+    return res.status(503).json({
+      error: 'ia_apagada',
+      mensaje: 'La consulta por voz no está disponible ahora.',
+    });
+  }
+
+  if (!presupuesto.hayMargen()) {
+    presupuesto.rechazar();
+    const { reinicioEnMin } = presupuesto.estado();
+    return res.status(429).json({
+      error: 'presupuesto_agotado',
+      mensaje: `Alcancé mi límite de consultas por hora. Vuelve en ${reinicioEnMin} minutos.`,
+    });
+  }
+
+  // Los eventos los verifica el backend contra su propia caché: el cliente
+  // manda ids y distancias, no descripciones que podrían ser inventadas.
+  const verificados = (Array.isArray(cercanos) ? cercanos : [])
+    .slice(0, 12)
+    .map((c) => {
+      const real = cache.get(c?.id);
+      if (!real) return null;
+      return { ...real, metros: typeof c.metros === 'number' ? c.metros : undefined };
+    })
+    .filter(Boolean);
+
+  try {
+    presupuesto.consumir();
+    const salida = await responderVoz(
+      { pregunta, cercanos: verificados, contexto },
+      CONFIG.ia
+    );
+    res.json(salida);
+  } catch (err) {
+    console.error(`[voz] ✗ ${err.message}`);
+    res.status(502).json({ error: 'fallo_ia', mensaje: err.message });
   }
 });
 

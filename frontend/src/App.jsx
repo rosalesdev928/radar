@@ -20,6 +20,7 @@ import { pedirToken, suscribir } from './identidad';
 import { leerTema, guardarTema } from './tema';
 import Fondo from './fondo';
 import AlertasVigilante from './vigilante';
+import Voz from './Voz';
 import {
   useUbicacion,
   distancia,
@@ -578,6 +579,19 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
 
         {/* ----- Mapa ----- */}
         <main className={`${verMapa ? 'block' : 'hidden'} lg:block flex-1 min-h-0 relative`}>
+          <Voz
+            eventos={eventos}
+            posicion={ubicacion.pos}
+            contexto={{
+              total: eventos.length,
+              enCurso: eventos.filter((e) => e.estado === 'atendiendo').length,
+              distrito: miDistrito,
+            }}
+            onMencionar={(ids) => {
+              if (ids?.length) setNuevos(new Set(ids));
+            }}
+          />
+
           <Mapa
             eventos={filtrados}
             tema={tema}
