@@ -20,6 +20,16 @@ import { pedirToken, suscribir } from './identidad';
 import { leerTema, guardarTema } from './tema';
 import Fondo from './fondo';
 import AlertasVigilante from './vigilante';
+import {
+  useUbicacion,
+  distancia,
+  formatearDistancia,
+  coordsDe,
+  leerAvisoCercania,
+  guardarAvisoCercania,
+  RADIO_CERCANIA,
+  ESPERA_ENTRE_AVISOS,
+} from './ubicacion';
 import { aFecha, haceCuanto } from './formato';
 
 const CANAL = import.meta.env.VITE_PORTAL_CHANNEL;
@@ -138,7 +148,7 @@ function Entrada({ onEntrar, instalable, onInstalar }) {
 function AvisoCercano({ aviso, onAbrir, onCerrar }) {
   if (!aviso) return null;
 
-  const { evento, extras } = aviso;
+  const { evento, extras, metros } = aviso;
   const color = COLORES[evento.tipo] ?? COLORES.otro;
 
   return (
@@ -160,7 +170,8 @@ function AvisoCercano({ aviso, onAbrir, onCerrar }) {
               style={{ background: color }}
             />
             <span className="display text-[10.5px] font-bold tracking-wide" style={{ color }}>
-              {ETIQUETAS[evento.tipo] ?? 'Emergencia'} en tu zona
+              {ETIQUETAS[evento.tipo] ?? 'Emergencia'}
+              {metros != null ? ` a ${formatearDistancia(metros)}` : ' en tu zona'}
             </span>
             <button
               onClick={onCerrar}
@@ -214,6 +225,12 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [permiso, setPermiso] = useState(() => estadoPermiso());
   const [aviso, setAviso] = useState(null);
 
+  /* La posición vive aquí, no en el mapa: el aviso de cercanía la necesita
+     aunque el usuario esté en otra sección. Nunca sale del navegador. */
+  const ubicacion = useUbicacion();
+  const [avisoCercania, setAvisoCercania] = useState(() => leerAvisoCercania());
+  const ultimoAvisoRef = useRef(0);
+
   const metadata = useMemo(() => (usuario ? { nombre: usuario } : undefined), [usuario]);
   const opciones = useMemo(
     () => ({ channelId: CANAL, history: 200, metadata }),
@@ -240,6 +257,15 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     prefs.current = { distrito: miDistrito, alertas };
   }, [miDistrito, alertas]);
 
+  const cercania = useRef({ activo: false, posicion: null, espera: 0 });
+  useEffect(() => {
+    cercania.current = {
+      activo: avisoCercania,
+      posicion: ubicacion.pos,
+      espera: ultimoAvisoRef.current,
+    };
+  }, [avisoCercania, ubicacion.pos, aviso]);
+
   useEffect(() => {
     const ids = new Set(eventos.map((e) => e.id));
 
@@ -253,6 +279,39 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
 
     if (recien.length) {
       setNuevos(new Set(recien));
+
+      /* ---- Aviso por cercanía real ----
+         Solo uno: el más cercano. Si acaban de entrar seis emergencias y
+         estás en el centro, seis notificaciones seguidas no informan, molestan
+         — y a la segunda las ignoras. Elegimos la más próxima y callamos el
+         resto. */
+      const { activo, posicion, espera } = cercania.current;
+
+      if (activo && posicion && Date.now() - espera > ESPERA_ENTRE_AVISOS * 60000) {
+        let masCerca = null;
+
+        for (const e of eventos) {
+          if (!recien.includes(e.id)) continue;
+          const c = coordsDe(e);
+          if (!c) continue;
+
+          const m = distancia(posicion[0], posicion[1], c[0], c[1]);
+          if (m > RADIO_CERCANIA) continue;
+          if (!masCerca || m < masCerca.metros) masCerca = { evento: e, metros: m };
+        }
+
+        if (masCerca) {
+          ultimoAvisoRef.current = Date.now();
+          setAviso({ evento: masCerca.evento, extras: 0, metros: masCerca.metros });
+
+          notificar({
+            titulo: `${ETIQUETAS[masCerca.evento.tipo] ?? 'Emergencia'} a ${formatearDistancia(masCerca.metros)}`,
+            cuerpo: masCerca.evento.descripcion ?? '',
+            tag: `radar-cerca-${masCerca.evento.id}`,
+          });
+        }
+      }
+
       const t = setTimeout(() => setNuevos(new Set()), 9000);
       return () => clearTimeout(t);
     }
@@ -334,6 +393,23 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     } finally {
       setRegistrando(false);
     }
+  }
+
+  async function alternarCercania() {
+    if (avisoCercania) {
+      setAvisoCercania(false);
+      guardarAvisoCercania(false);
+      return;
+    }
+
+    // Necesita dos permisos distintos: notificaciones y ubicación.
+    const res = await pedirPermiso();
+    setPermiso(res);
+    if (res !== 'granted' && res !== 'no-soportado') return;
+
+    ubicacion.iniciar();
+    setAvisoCercania(true);
+    guardarAvisoCercania(true);
   }
 
   function cambiarTema(t) {
@@ -488,6 +564,10 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
                 enBandeja={counter}
                 tema={tema}
                 onCambiarTema={cambiarTema}
+                avisoCercania={avisoCercania}
+                onToggleCercania={alternarCercania}
+                ubicacionActiva={ubicacion.activo}
+                errorUbicacion={ubicacion.error}
               />
             )}
             {verMapa && (
@@ -501,6 +581,7 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
           <Mapa
             eventos={filtrados}
             tema={tema}
+            ubicacion={ubicacion}
             mostrarCerrados={mostrarCerrados}
             seccion={seccion}
             seleccionado={seleccionado}

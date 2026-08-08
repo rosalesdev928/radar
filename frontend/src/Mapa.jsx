@@ -1,12 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents, useMap } from 'react-leaflet';
 import { TEMAS } from './tema';
+import { distancia, coordsDe, RADIO_CERCANIA } from './ubicacion';
 import L from 'leaflet';
 import { svgDe, COLORES, ETIQUETAS } from './iconos';
 import { ABREV, fechaHora } from './formato';
  
 const CENTRO = [-12.0464, -77.0428];
-const RADIO_CERCANIA = 2000; // metros
 const ZOOM_ETIQUETAS = 14;
 const ZOOM_DETALLE = 16;
  
@@ -206,72 +206,30 @@ export default function Mapa({
   nuevos,
   onAbrirChat,
   tema = 'oscuro',
+  ubicacion,
 }) {
   const [zoom, setZoom] = useState(11);
-  const [miPos, setMiPos] = useState(null);
-  const [precision, setPrecision] = useState(null);
-  const vigilanciaRef = useRef(null);
 
-  /**
-   * Una sola lectura deja la posición congelada: si te mueves, el radio de
-   * proximidad miente. `watchPosition` la mantiene viva mientras la pestaña
-   * esté abierta.
-   */
-  function pedirUbicacion() {
-    if (!navigator.geolocation) return;
+  // La posición se gestiona en App: el aviso de cercanía la necesita aunque
+  // el usuario esté en otra sección, no solo mirando el mapa.
+  const miPos = ubicacion?.pos ?? null;
+  const precision = ubicacion?.precision ?? null;
 
-    // Segundo toque: dejar de seguir
-    if (vigilanciaRef.current != null) {
-      navigator.geolocation.clearWatch(vigilanciaRef.current);
-      vigilanciaRef.current = null;
-      setMiPos(null);
-      setPrecision(null);
-      return;
-    }
+  const pedirUbicacion = () => ubicacion?.alternar?.();
 
-    vigilanciaRef.current = navigator.geolocation.watchPosition(
-      (p) => {
-        setMiPos([p.coords.latitude, p.coords.longitude]);
-        setPrecision(p.coords.accuracy ?? null);
-      },
-      () => {
-        vigilanciaRef.current = null;
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
-  }
-
-  useEffect(() => {
-    return () => {
-      if (vigilanciaRef.current != null) {
-        navigator.geolocation.clearWatch(vigilanciaRef.current);
-      }
-    };
-  }, []);
-
-  /** Distancia en metros entre dos puntos (fórmula del haversine). */
+  /* Qué eventos caen dentro del radio. Mismo cálculo que usa el aviso de
+     cercanía, para que el círculo del mapa y la notificación coincidan. */
   const cercanos = useMemo(() => {
     if (!miPos) return new Set();
-    const [lat1, lon1] = miPos;
-    const R = 6371000;
-    const rad = (g) => (g * Math.PI) / 180;
-
     const ids = new Set();
     for (const e of eventos) {
-      if (!e.coordenadas_validas) continue;
-      const lat2 = e.lat;
-      const lon2 = e.lon ?? e.lng;
-      const dLat = rad(lat2 - lat1);
-      const dLon = rad(lon2 - lon1);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
-      const d = 2 * R * Math.asin(Math.sqrt(a));
-      if (d <= RADIO_CERCANIA) ids.add(e.id);
+      const c = coordsDe(e);
+      if (!c) continue;
+      if (distancia(miPos[0], miPos[1], c[0], c[1]) <= RADIO_CERCANIA) ids.add(e.id);
     }
     return ids;
   }, [miPos, eventos]);
- 
+
   const visibles = eventos.filter(
     (e) => e.coordenadas_validas && (mostrarCerrados || e.estado === 'atendiendo')
   );

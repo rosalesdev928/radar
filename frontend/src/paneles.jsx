@@ -395,6 +395,10 @@ export function Ajustes({
   enBandeja = 0,
   tema = 'oscuro',
   onCambiarTema,
+  avisoCercania,
+  onToggleCercania,
+  ubicacionActiva,
+  errorUbicacion,
 }) {
   const bloqueado = permiso === 'denied';
   const sinSoporte = permiso === 'no-soportado';
@@ -433,9 +437,41 @@ export function Ajustes({
           </select>
           <p className="text-[11px] text-[#7C8AA0] leading-relaxed mt-2">
             Seguirás viendo toda Lima en el mapa. Esto solo decide de qué zona
-            te avisamos.
+            te avisamos. Tu ubicación exacta nunca sale de este dispositivo.
           </p>
         </div>
+
+        {/* Aviso por cercanía real: más útil que el distrito, porque un
+            distrito grande incluye sitios a 10 km de ti. */}
+        <button
+          onClick={onToggleCercania}
+          disabled={bloqueado || sinSoporte}
+          className="w-full bg-[#161F2F] rounded-xl px-4 py-3 mt-2 flex items-center
+                     justify-between disabled:opacity-45"
+        >
+          <span className="text-[13.5px] text-left">
+            Avisarme de lo que pase cerca de mí
+          </span>
+          <Interruptor activo={avisoCercania} />
+        </button>
+
+        {avisoCercania && (
+          <p className="text-[11px] text-[#7C8AA0] mt-1.5 px-1 leading-relaxed">
+            {ubicacionActiva
+              ? 'Te avisaremos de la emergencia más cercana dentro de 2 km. Solo una por vez, no una por cada evento.'
+              : 'Esperando tu ubicación…'}
+          </p>
+        )}
+
+        {errorUbicacion && (
+          <p className="text-[11px] text-amber-400/90 mt-1.5 px-1 leading-relaxed">
+            {errorUbicacion}
+          </p>
+        )}
+
+        <p className="dato text-[9px] text-[#4A5568] mt-3 mb-1 px-1">
+          POR DISTRITO
+        </p>
 
         <button
           onClick={onToggleAlertas}
