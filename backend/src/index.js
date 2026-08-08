@@ -380,6 +380,11 @@ app.post('/voz', limiteVoz, async (req, res) => {
       });
     }
 
+    console.log(
+      `[voz] "${pregunta.slice(0, 60)}" · ${verificados.length} cerca · ` +
+        `${Object.keys(indice).length} distritos en el índice`
+    );
+
     const salida = await responderVoz(
       { pregunta, cercanos: verificados, porDistrito: indice, contexto },
       CONFIG.ia

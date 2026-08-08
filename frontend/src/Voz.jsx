@@ -222,7 +222,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
       {/* Panel de conversación */}
       {(transcripcion || respuesta || error) && (
         <div
-          className="absolute z-[900] left-3 right-3 bottom-[11rem] lg:left-auto lg:right-4
+          className="absolute z-[900] left-3 right-3 bottom-[14rem] lg:left-auto lg:right-4
                      lg:w-[340px] rounded-2xl border border-white/12 bg-[#0B1120]/95
                      backdrop-blur-md shadow-2xl shadow-black/60 px-4 py-3"
         >
@@ -265,7 +265,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
         onClick={escuchar}
         disabled={pensando}
         aria-label="Preguntar por voz"
-        className={`absolute z-[900] right-4 bottom-[7.5rem] w-12 h-12 rounded-full grid
+        className={`absolute z-[900] right-4 bottom-[10.5rem] w-12 h-12 rounded-full grid
                     place-items-center shadow-lg shadow-black/50 transition
                     disabled:opacity-60 ${
                       oyendo
