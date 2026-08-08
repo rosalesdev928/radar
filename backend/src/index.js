@@ -120,13 +120,14 @@ app.use((req, res, next) => {
 const analisis = new Map();
 
 /** Firma del estado del hilo: si no cambia, no volvemos a llamar a la IA. */
-function firmaDelHilo(mensajes, votos) {
+function firmaDelHilo(mensajes, votos, gravedad) {
   const v = votos ?? {};
   return [
     mensajes.length,
     v.confirmo | 0,
     v.nada | 0,
     v.termino | 0,
+    typeof gravedad === 'number' ? gravedad.toFixed(1) : '-',
   ].join(':');
 }
 
@@ -161,7 +162,7 @@ app.get('/eventos', (req, res) => {
  * en memoria via Portal.
  */
 app.post('/analizar', async (req, res) => {
-  const { evento, mensajes, votos } = req.body ?? {};
+  const { evento, mensajes, votos, gravedad } = req.body ?? {};
 
   if (!evento?.id || !Array.isArray(mensajes)) {
     return res.status(400).json({ error: 'Faltan evento o mensajes' });
@@ -175,14 +176,14 @@ app.post('/analizar', async (req, res) => {
   }
 
   // Si ni los mensajes ni los votos cambiaron, devolvemos el analisis guardado
-  const firma = firmaDelHilo(mensajes, votos);
+  const firma = firmaDelHilo(mensajes, votos, gravedad);
   const previo = analisis.get(evento.id);
   if (previo && previo.firma === firma) {
     return res.json({ ...previo.resultado, _cacheado: true });
   }
 
   try {
-    const resultado = await analizarHilo({ evento, mensajes, votos }, CONFIG.ia);
+    const resultado = await analizarHilo({ evento, mensajes, votos, gravedad }, CONFIG.ia);
     analisis.set(evento.id, { firma, resultado });
     res.json(resultado);
   } catch (err) {

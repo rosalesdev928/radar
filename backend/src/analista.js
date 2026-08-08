@@ -24,6 +24,17 @@ Específicamente:
 
 4. CONFIANZA — "alta", "media" o "baja", según cuántas personas distintas coinciden y qué tan específicos son.
 
+CÓMO USAR LA GRAVEDAD PERCIBIDA
+El campo "gravedad_percibida" es el promedio (1 a 5) que pusieron los vecinos que
+dicen estar viendo el incidente. 1 es leve y 5 es crítico. Úsalo así:
+- Si la gravedad percibida es alta (4 o 5) y el parte oficial movilizó pocas unidades,
+  menciónalo: puede ser un incidente creciendo más rápido de lo que refleja el parte.
+- Si es baja (1 o 2) y el parte lo marca como grave, también menciónalo: puede estar
+  controlado ya.
+- Con menos de 3 calificaciones el promedio no significa nada. Ignóralo.
+- Nunca contradigas al parte oficial basándote SOLO en el promedio. Necesitas texto
+  que respalde la discrepancia.
+
 CÓMO USAR LA VOTACIÓN
 El objeto "votacion" trae tres contadores, uno por persona:
    - confirmo: vecinos que dicen ver el incidente
@@ -78,9 +89,13 @@ function prepararVotos(votos) {
   return limpio;
 }
 
-async function analizarHilo({ evento, mensajes, votos }, { apiKey, modelo }) {
+async function analizarHilo({ evento, mensajes, votos, gravedad }, { apiKey, modelo }) {
   const hilo = prepararHilo(mensajes);
   const votacion = prepararVotos(votos);
+  const gravedadPercibida =
+    typeof gravedad === 'number' && gravedad >= 1 && gravedad <= 5
+      ? Number(gravedad.toFixed(2))
+      : null;
 
   // Sin texto suficiente y sin masa crítica de votos, no vale gastar una llamada
   if (hilo.length < 2 && votacion.total < 3) {
@@ -105,6 +120,7 @@ async function analizarHilo({ evento, mensajes, votos }, { apiKey, modelo }) {
     },
     hilo_ciudadano: hilo,
     votacion,
+    gravedad_percibida: gravedadPercibida,
   };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {

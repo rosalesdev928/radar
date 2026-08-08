@@ -36,6 +36,37 @@ const OPCIONES_VOTO = [
   },
 ];
 
+/* ---------- Reacciones ---------- */
+const REACCIONES = ['🔥', '👀', '⚠️', '🚑', '🙏'];
+
+/**
+ * Agrupa reacciones por mensaje. Un dispositivo puede poner varias distintas
+ * al mismo mensaje, pero no la misma dos veces: la clave es mensaje+emoji+
+ * dispositivo, y el último valor gana (así el segundo toque la retira).
+ */
+function contarReacciones(mensajes) {
+  const estado = new Map(); // `${msgId}|${emoji}|${disp}` -> boolean
+
+  for (const m of mensajes) {
+    const r = m.content?.reaccion;
+    const destino = m.content?.mensaje;
+    const disp = m.content?.dispositivo;
+    if (!r || !destino || !disp) continue;
+    estado.set(`${destino}|${r}|${disp}`, m.content.activa !== false);
+  }
+
+  const porMensaje = new Map(); // msgId -> Map(emoji -> {total, mio})
+  for (const [clave, activa] of estado) {
+    if (!activa) continue;
+    const [destino, emoji] = clave.split('|');
+    if (!porMensaje.has(destino)) porMensaje.set(destino, new Map());
+    const m = porMensaje.get(destino);
+    m.set(emoji, (m.get(emoji) ?? 0) + 1);
+  }
+
+  return { porMensaje, estado };
+}
+
 /**
  * Un voto por dispositivo: recorremos en orden y el último gana.
  * Portal serializa las escrituras por canal, así que el orden es fiable.
@@ -52,15 +83,99 @@ function contarVotos(mensajes) {
     const d = m.content?.dispositivo;
     // Los votos antiguos sin dispositivo se ignoran: no se pueden deduplicar
     if (!v || !d) continue;
-    porDispositivo.set(d, v);
+    porDispositivo.set(d, { voto: v, gravedad: m.content?.gravedad });
   }
 
   const conteo = { confirmo: 0, nada: 0, termino: 0 };
-  for (const v of porDispositivo.values()) {
-    if (v in conteo) conteo[v]++;
+  const gravedades = [];
+
+  for (const { voto, gravedad } of porDispositivo.values()) {
+    if (voto in conteo) conteo[voto]++;
+    // Solo cuenta la gravedad de quien dice estar viéndolo
+    if (voto === 'confirmo' && typeof gravedad === 'number') {
+      gravedades.push(gravedad);
+    }
   }
 
-  return { conteo, porDispositivo };
+  const gravedadMedia = gravedades.length
+    ? gravedades.reduce((a, b) => a + b, 0) / gravedades.length
+    : null;
+
+  return { conteo, porDispositivo, gravedadMedia, votosConGravedad: gravedades.length };
+}
+
+const ESCALA = [
+  { valor: 1, texto: 'Leve', color: '#22C55E' },
+  { valor: 2, texto: 'Moderado', color: '#84CC16' },
+  { valor: 3, texto: 'Serio', color: '#FFB020' },
+  { valor: 4, texto: 'Grave', color: '#FF7A29' },
+  { valor: 5, texto: 'Crítico', color: '#FF3B30' },
+];
+
+function colorDeGravedad(v) {
+  return ESCALA[Math.round(v) - 1]?.color ?? '#7C8AA0';
+}
+
+/**
+ * Escala de gravedad. Solo aparece si dijiste que lo estás viendo: pedirle
+ * a alguien que califique la gravedad de algo que no ve no aporta señal,
+ * ensucia el promedio.
+ */
+function BarraGravedad({ valor, media, cuantos, listos, onCambiar }) {
+  const actual = valor ?? 3;
+
+  return (
+    <div className="px-4 pt-2.5">
+      <div className="rounded-xl border border-white/10 bg-[#131C2C] p-3">
+        <div className="flex items-baseline justify-between mb-2">
+          <span className="text-[12px] text-slate-300">
+            {valor ? '¿Qué tan grave se ve?' : 'Califica la gravedad'}
+          </span>
+          {media != null && (
+            <span className="dato text-[10px]" style={{ color: colorDeGravedad(media) }}>
+              media {media.toFixed(1)} · {cuantos}
+            </span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-5 gap-1">
+          {ESCALA.map((e) => {
+            const activo = valor === e.valor;
+            return (
+              <button
+                key={e.valor}
+                onClick={() => onCambiar(e.valor)}
+                disabled={!listos}
+                className={`py-1.5 rounded-lg border text-[10px] leading-tight transition
+                            disabled:opacity-40 ${
+                              activo ? 'bg-white/[0.1]' : 'bg-white/[0.03] hover:bg-white/[0.07]'
+                            }`}
+                style={{
+                  borderColor: activo ? e.color : 'rgba(255,255,255,0.08)',
+                  color: activo ? e.color : '#7C8AA0',
+                }}
+              >
+                {e.texto}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Franja con el promedio de todos, no solo el tuyo */}
+        {media != null && (
+          <div className="mt-2 h-1 rounded-full bg-white/[0.07] overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${((media - 1) / 4) * 100}%`,
+                background: colorDeGravedad(media),
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function BarraVotos({ conteo, miVoto, listos, onVotar }) {
@@ -122,7 +237,7 @@ function BarraVotos({ conteo, miVoto, listos, onVotar }) {
 }
 
 /* ---------- Lectura del hilo por IA ---------- */
-function Analisis({ evento, mensajes, votos }) {
+function Analisis({ evento, mensajes, votos, gravedad }) {
   const [cargando, setCargando] = useState(false);
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState(null);
@@ -140,6 +255,7 @@ function Analisis({ evento, mensajes, votos }) {
         body: JSON.stringify({
           evento,
           votos,
+          gravedad,
           mensajes: mensajes
             .filter((m) => m.content?.texto)
             .map((m) => ({ texto: m.content.texto, nombre: m.content.nombre })),
@@ -242,7 +358,63 @@ function horaCorta(ts) {
   return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 
-function Burbuja({ msg, propio }) {
+function Reacciones({ cuenta, mias, listos, onReaccionar }) {
+  const [abierto, setAbierto] = useState(false);
+  const puestas = [...(cuenta?.entries() ?? [])];
+
+  return (
+    <div className="flex items-center gap-1 mt-1 flex-wrap">
+      {puestas.map(([emoji, total]) => (
+        <button
+          key={emoji}
+          onClick={() => onReaccionar(emoji)}
+          disabled={!listos}
+          className={`px-1.5 py-0.5 rounded-full text-[11px] leading-none border transition
+                      disabled:opacity-40 ${
+                        mias.has(emoji)
+                          ? 'bg-[#FF3B30]/15 border-[#FF3B30]/50'
+                          : 'bg-white/[0.05] border-white/10 hover:bg-white/[0.1]'
+                      }`}
+        >
+          {emoji} <span className="dato text-[9.5px] text-slate-300">{total}</span>
+        </button>
+      ))}
+
+      {abierto ? (
+        <span className="flex items-center gap-0.5">
+          {REACCIONES.map((e) => (
+            <button
+              key={e}
+              onClick={() => {
+                onReaccionar(e);
+                setAbierto(false);
+              }}
+              className="w-6 h-6 grid place-items-center rounded-full text-[13px]
+                         hover:bg-white/10 transition"
+            >
+              {e}
+            </button>
+          ))}
+        </span>
+      ) : (
+        <button
+          onClick={() => setAbierto(true)}
+          className="w-5 h-5 grid place-items-center rounded-full text-[#4A5568]
+                     hover:text-slate-300 hover:bg-white/5 transition"
+          aria-label="Reaccionar"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"
+               strokeLinecap="round" className="w-[13px] h-[13px]">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8M9 9.5h.01M15 9.5h.01" />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Burbuja({ msg, propio, cuenta, mias, listos, onReaccionar }) {
   const nombre = msg.content?.nombre;
 
   return (
@@ -266,6 +438,13 @@ function Burbuja({ msg, propio }) {
         {msg.status === 'pending' && ' · enviando'}
         {msg.status === 'failed' && ' · no se envió'}
       </span>
+
+      <Reacciones
+        cuenta={cuenta}
+        mias={mias}
+        listos={listos}
+        onReaccionar={(e) => onReaccionar(msg.id, e)}
+      />
     </div>
   );
 }
@@ -299,13 +478,35 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
   const miDispositivo = useMemo(() => idDispositivo(), []);
 
   /* Votos y conversación viven en el mismo canal; los separamos aquí */
-  const { conteo, porDispositivo } = useMemo(() => contarVotos(messages), [messages]);
+  const { conteo, porDispositivo, gravedadMedia, votosConGravedad } = useMemo(
+    () => contarVotos(messages),
+    [messages]
+  );
+  const { porMensaje, estado: estadoReacciones } = useMemo(
+    () => contarReacciones(messages),
+    [messages]
+  );
   const conversacion = useMemo(
     () => messages.filter((m) => m.content?.texto),
     [messages]
   );
-  const votoCrudo = porDispositivo.get(miDispositivo) ?? null;
-  const miVoto = votoCrudo && votoCrudo !== 'ninguno' ? votoCrudo : null;
+
+  const mio = porDispositivo.get(miDispositivo) ?? null;
+  const miVoto = mio && mio.voto !== 'ninguno' ? mio.voto : null;
+  const miGravedad = miVoto === 'confirmo' ? mio?.gravedad ?? null : null;
+
+  /** Las reacciones que puse yo a un mensaje, para pintarlas resaltadas. */
+  const misReacciones = useMemo(() => {
+    const porMsg = new Map();
+    for (const [clave, activa] of estadoReacciones) {
+      if (!activa) continue;
+      const [destino, emoji, disp] = clave.split('|');
+      if (disp !== miDispositivo) continue;
+      if (!porMsg.has(destino)) porMsg.set(destino, new Set());
+      porMsg.get(destino).add(emoji);
+    }
+    return porMsg;
+  }, [estadoReacciones, miDispositivo]);
 
   /* Auto-scroll al último mensaje */
   useEffect(() => {
@@ -339,11 +540,47 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
         content: {
           voto: valor,
           dispositivo: miDispositivo,
+          // Al cambiar de voto la gravedad deja de aplicar: solo tiene
+          // sentido junto a "lo confirmo".
+          gravedad: valor === 'confirmo' ? miGravedad ?? undefined : undefined,
           nombre: usuario || null,
         },
       });
     } catch {
       /* si falla, el conteo simplemente no cambia */
+    }
+  }
+
+  async function calificar(gravedad) {
+    if (!listos || miVoto !== 'confirmo') return;
+    try {
+      await send({
+        content: {
+          voto: 'confirmo',
+          gravedad,
+          dispositivo: miDispositivo,
+          nombre: usuario || null,
+        },
+      });
+    } catch {
+      /* si falla, se mantiene la calificación anterior */
+    }
+  }
+
+  async function reaccionar(mensajeId, emoji) {
+    if (!listos) return;
+    const yaEsta = misReacciones.get(mensajeId)?.has(emoji) ?? false;
+    try {
+      await send({
+        content: {
+          reaccion: emoji,
+          mensaje: mensajeId,
+          activa: !yaEsta, // el segundo toque la retira
+          dispositivo: miDispositivo,
+        },
+      });
+    } catch {
+      /* sin reintento: una reacción perdida no es grave */
     }
   }
 
@@ -436,7 +673,22 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
           onVotar={votar}
         />
 
-        <Analisis evento={evento} mensajes={messages} votos={conteo} />
+        {miVoto === 'confirmo' && (
+          <BarraGravedad
+            valor={miGravedad}
+            media={gravedadMedia}
+            cuantos={votosConGravedad}
+            listos={listos}
+            onCambiar={calificar}
+          />
+        )}
+
+        <Analisis
+          evento={evento}
+          mensajes={messages}
+          votos={conteo}
+          gravedad={gravedadMedia}
+        />
 
         {/* Mensajes */}
         <div className="flex-1 overflow-y-auto min-h-0 px-4 py-3 flex flex-col gap-2.5">
@@ -455,7 +707,15 @@ export default function ChatEvento({ evento, usuario, onCerrar }) {
           )}
 
           {conversacion.map((m) => (
-            <Burbuja key={m.id} msg={m} propio={me?.id && m.sender === me.id} />
+            <Burbuja
+              key={m.id}
+              msg={m}
+              propio={me?.id && m.sender === me.id}
+              cuenta={porMensaje.get(m.id)}
+              mias={misReacciones.get(m.id) ?? new Set()}
+              listos={listos}
+              onReaccionar={reaccionar}
+            />
           ))}
 
           {typing.length > 0 && (
