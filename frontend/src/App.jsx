@@ -643,8 +643,11 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
       )}
 
       {/* ----- Navegación móvil ----- */}
-      <nav className="lg:hidden shrink-0 h-14 bg-[#0B1120] border-t border-white/10 flex
-                      pb-[env(safe-area-inset-bottom)] box-content">
+      {/* La franja del indicador de inicio de iOS deja ~34 px muertos bajo los
+          iconos. En vez de dejarlos en negro, los usamos para el pulso de la
+          ciudad: ocupa el hueco y añade información en vez de decorarlo. */}
+      <nav className="lg:hidden shrink-0 bg-[#0B1120] border-t border-white/10 flex flex-col">
+        <div className="h-14 flex shrink-0">
         {SECCIONES.map((s) => (
           <button
             key={s.id}
@@ -661,6 +664,23 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
             <span className="text-[9.5px]">{s.nombre}</span>
           </button>
         ))}
+        </div>
+
+        <div
+          className="flex items-start justify-center overflow-hidden
+                     h-[env(safe-area-inset-bottom)] min-h-0"
+        >
+          <span className="dato text-[9px] text-[#4A5568] whitespace-nowrap py-1">
+            <span className="text-[#FF3B30]">
+              {eventos.filter((e) => e.estado === 'atendiendo').length}
+            </span>{' '}
+            en curso
+            <span className="mx-1.5 text-white/15">·</span>
+            {eventos.length} en 24 h
+            <span className="mx-1.5 text-white/15">·</span>
+            <span className="text-emerald-400/70">en vivo</span>
+          </span>
+        </div>
       </nav>
 
       {/* ----- Navegación escritorio ----- */}

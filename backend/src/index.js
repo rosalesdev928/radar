@@ -366,9 +366,21 @@ app.post('/voz', limiteVoz, async (req, res) => {
 
   try {
     presupuesto.consumir();
-    // El índice por distrito lo armamos aquí desde la caché propia: así el
-    // cliente no puede inyectar eventos inventados en el prompt.
-    const indice = {};
+    /* Índice por distrito.
+     *
+     * Lo preferimos armado desde la caché propia, para que el cliente no
+     * pueda inyectar eventos inventados en el prompt. Pero la caché se vacía
+     * en cada reinicio de Render y tarda cerca de un minuto en rellenarse
+     * —los eventos se clasifican con IA en lotes antes de guardarse—, y en
+     * esa ventana el navegador sabe más que el servidor: él lee el historial
+     * de Portal y tiene la lista completa.
+     *
+     * Responder "no hay nada en Breña" porque el servidor acaba de arrancar
+     * es peor que confiar en el cliente para un dato que, además, ya es
+     * público en el canal de Portal. Así que usamos la caché cuando la hay y
+     * caemos al índice del cliente cuando está vacía.
+     */
+    let indice = {};
     for (const e of cache.values()) {
       if (!e.distrito) continue;
       (indice[e.distrito] ??= []).push({
@@ -380,9 +392,25 @@ app.post('/voz', limiteVoz, async (req, res) => {
       });
     }
 
+    let origenIndice = 'cache';
+    if (!Object.keys(indice).length && porDistrito && typeof porDistrito === 'object') {
+      origenIndice = 'cliente';
+      indice = {};
+      for (const [distrito, lista] of Object.entries(porDistrito).slice(0, 50)) {
+        if (!Array.isArray(lista)) continue;
+        indice[String(distrito).slice(0, 60)] = lista.slice(0, 25).map((e) => ({
+          tipo: String(e?.tipo ?? '').slice(0, 40),
+          descripcion: String(e?.descripcion ?? '').slice(0, 200),
+          gravedad: String(e?.gravedad ?? '').slice(0, 20),
+          estado: String(e?.estado ?? '').slice(0, 20),
+          hora: String(e?.hora ?? '').slice(0, 40),
+        }));
+      }
+    }
+
     console.log(
       `[voz] "${pregunta.slice(0, 60)}" · ${verificados.length} cerca · ` +
-        `${Object.keys(indice).length} distritos en el índice`
+        `${Object.keys(indice).length} distritos en el índice (${origenIndice})`
     );
 
     const salida = await responderVoz(
