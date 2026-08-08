@@ -19,6 +19,7 @@ import {
 import { pedirToken, suscribir } from './identidad';
 import { leerTema, guardarTema } from './tema';
 import Fondo from './fondo';
+import AlertasVigilante from './vigilante';
 import { aFecha, haceCuanto } from './formato';
 
 const CANAL = import.meta.env.VITE_PORTAL_CHANNEL;
@@ -453,6 +454,8 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
               <span className="text-[11px] text-[#7C8AA0]">en 24 h</span>
             </div>
           </div>
+
+          {seccion !== 'ajustes' && <AlertasVigilante />}
 
           {seccion !== 'ajustes' && (
             <div className="border-b border-white/5">

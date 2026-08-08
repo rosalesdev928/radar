@@ -8,6 +8,7 @@ const { clasificar } = require('./agente');
 const { analizarHilo } = require('./analista');
 const { RegistroDeSuscripciones } = require('./suscripciones');
 const { Avisador } = require('./avisos');
+const { Vigilante } = require('./vigilante');
 const { esDeLima, slug, normalizar } = require('./distritos');
 
 const CIUDAD = process.env.CIUDAD || 'radar';
@@ -31,6 +32,13 @@ const registro = new RegistroDeSuscripciones({
   canal: `${CIUDAD}:suscripciones`,
 });
 const avisador = new Avisador({ secretKey: process.env.PORTAL_SECRET });
+const vigilante = new Vigilante({
+  secretKey: process.env.PORTAL_SECRET,
+  canal: `${CIUDAD}:alertas`,
+  ia: CONFIG.ia,
+  // Revisar cada 30 s no aporta: los patrones tardan en formarse.
+  cadaCiclos: parseInt(process.env.VIGILANTE_CADA_CICLOS || '10', 10),
+});
 const cache = new Map(); // id -> evento clasificado
 
 const estadisticas = {
@@ -89,6 +97,14 @@ async function ejecutarCiclo() {
     estadisticas.ultimoCiclo = new Date().toISOString();
     estadisticas.ultimoError = null;
 
+    // El vigilante razona sobre el conjunto del día, no sobre este ciclo.
+    // Si falla, no debe tumbar el ciclo: es una capa opcional.
+    try {
+      await vigilante.revisar([...cache.values()]);
+    } catch (err) {
+      console.error(`[vigilante] ✗ ${err.message}`);
+    }
+
     const porDistrito = clasificados.reduce((m, e) => {
       m[e.distrito] = (m[e.distrito] || 0) + 1;
       return m;
@@ -143,6 +159,8 @@ app.get('/', (_, res) => {
     suscriptores: registro.total,
     porDistrito: registro.resumen(),
     avisos: avisador.estadisticas(),
+    vigilante: vigilante.estadisticas(),
+    canalAlertas: `${CONFIG.ciudad}:alertas`,
     ...estadisticas,
   });
 });

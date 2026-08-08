@@ -1,7 +1,8 @@
+import { useMemo } from 'react';
 import { COLORES, ETIQUETAS, svgDe } from './iconos';
 import { DISTRITOS } from './alertas';
 import { TEMAS } from './tema';
-import { ABREV, fechaHora } from './formato';
+import { ABREV, fechaHora, aFecha } from './formato';
 
 const TIPOS = [
   'incendio',
@@ -150,6 +151,137 @@ export function Listado({ eventos, onSeleccionar, nuevos }) {
 }
 
 /* ---------- Estadísticas ---------- */
+/* ---------- Patrones temporales ---------- */
+
+/**
+ * Reparto por hora del día. No es decoración: en los datos de Bomberos hay
+ * horas punta claras, y verlas cambia la lectura de "hoy hubo muchas".
+ */
+function RitmoHorario({ eventos }) {
+  const { barras, pico } = useMemo(() => {
+    const porHora = new Array(24).fill(0);
+
+    for (const e of eventos) {
+      const d = aFecha(e.hora);
+      if (d) porHora[d.getHours()]++;
+    }
+
+    const max = Math.max(1, ...porHora);
+    const horaPico = porHora.indexOf(Math.max(...porHora));
+
+    return {
+      barras: porHora.map((n, h) => ({ h, n, alto: (n / max) * 100 })),
+      pico: { hora: horaPico, n: porHora[horaPico] },
+    };
+  }, [eventos]);
+
+  const ahora = new Date().getHours();
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-2.5">
+        <h3 className="display text-[12px] text-[#7C8AA0]">Ritmo del día</h3>
+        {pico.n > 0 && (
+          <span className="dato text-[9.5px] text-[#4A5568]">
+            pico {String(pico.hora).padStart(2, '0')}:00 · {pico.n}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-end gap-[2px] h-16">
+        {barras.map(({ h, n, alto }) => (
+          <div key={h} className="flex-1 flex flex-col justify-end h-full group relative">
+            <div
+              className="w-full rounded-sm transition-all"
+              style={{
+                height: `${Math.max(alto, n ? 6 : 2)}%`,
+                background: h === ahora ? '#FF3B30' : n ? '#35A7FF' : '#1E2940',
+                opacity: h === ahora ? 1 : 0.55 + (alto / 100) * 0.45,
+              }}
+            />
+            {n > 0 && (
+              <span className="absolute -top-4 left-1/2 -translate-x-1/2 dato text-[9px]
+                               text-slate-200 opacity-0 group-hover:opacity-100 transition
+                               pointer-events-none whitespace-nowrap">
+                {String(h).padStart(2, '0')}h · {n}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-between dato text-[8.5px] text-[#4A5568] mt-1">
+        <span>00h</span><span>06h</span><span>12h</span><span>18h</span><span>23h</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Distritos con más carga, cruzados con qué proporción es grave. Un distrito
+ * con 12 eventos leves y otro con 5 graves no son comparables por volumen.
+ */
+function DistritosCalientes({ eventos }) {
+  const filas = useMemo(() => {
+    const m = new Map();
+
+    for (const e of eventos) {
+      if (!e.distrito) continue;
+      if (!m.has(e.distrito)) m.set(e.distrito, { total: 0, graves: 0, activos: 0 });
+      const d = m.get(e.distrito);
+      d.total++;
+      if (e.relevancia === 'alta') d.graves++;
+      if (e.estado === 'atendiendo') d.activos++;
+    }
+
+    return [...m.entries()]
+      .map(([distrito, d]) => ({ distrito, ...d, ratio: d.graves / d.total }))
+      .sort((a, b) => b.graves - a.graves || b.total - a.total)
+      .slice(0, 8);
+  }, [eventos]);
+
+  if (!filas.length) return null;
+  const max = Math.max(1, ...filas.map((f) => f.total));
+
+  return (
+    <div>
+      <h3 className="display text-[12px] text-[#7C8AA0] mb-2.5">Distritos con más carga</h3>
+
+      <div className="space-y-1.5">
+        {filas.map((f) => (
+          <div key={f.distrito} className="flex items-center gap-2.5">
+            <span className="text-[11px] text-slate-300 w-[104px] shrink-0 truncate">
+              {f.distrito}
+            </span>
+
+            {/* La barra completa es el total; la parte roja, lo grave */}
+            <div className="flex-1 h-2.5 bg-white/[0.04] rounded-full overflow-hidden flex">
+              <div
+                className="h-full bg-[#FF3B30]"
+                style={{ width: `${(f.graves / max) * 100}%` }}
+              />
+              <div
+                className="h-full bg-[#35A7FF]/45"
+                style={{ width: `${((f.total - f.graves) / max) * 100}%` }}
+              />
+            </div>
+
+            <span className="dato text-[10.5px] text-slate-300 w-11 text-right shrink-0">
+              {f.graves > 0 && <span className="text-[#FF3B30]">{f.graves}</span>}
+              {f.graves > 0 && <span className="text-[#4A5568]">/</span>}
+              {f.total}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p className="dato text-[9px] text-[#4A5568] mt-2">
+        graves / total
+      </p>
+    </div>
+  );
+}
+
 export function Estadisticas({ eventos }) {
   const porTipo = TIPOS.map((t) => ({
     tipo: t,
@@ -159,12 +291,6 @@ export function Estadisticas({ eventos }) {
     .sort((a, b) => b.n - a.n);
 
   const max = Math.max(1, ...porTipo.map((x) => x.n));
-
-  const porDistrito = Object.entries(
-    eventos.reduce((m, e) => ({ ...m, [e.distrito]: (m[e.distrito] || 0) + 1 }), {})
-  )
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
 
   const sinGps = eventos.filter((e) => !e.coordenadas_validas).length;
   const activos = eventos.filter((e) => e.estado === 'atendiendo').length;
@@ -177,6 +303,8 @@ export function Estadisticas({ eventos }) {
         <Tarjeta valor={activos} etiqueta="En curso" color="#FF3B30" />
         <Tarjeta valor={graves} etiqueta="Graves" color="#FFB020" />
       </div>
+
+      <RitmoHorario eventos={eventos} />
 
       <div>
         <h3 className="display text-[12px] text-[#7C8AA0] mb-2.5">Por tipo</h3>
@@ -198,20 +326,7 @@ export function Estadisticas({ eventos }) {
         </div>
       </div>
 
-      <div>
-        <h3 className="display text-[12px] text-[#7C8AA0] mb-2.5">
-          Distritos con más emergencias
-        </h3>
-        <ul className="space-y-1.5">
-          {porDistrito.map(([d, n], i) => (
-            <li key={d} className="flex items-center gap-2.5 text-[12.5px]">
-              <span className="dato text-[10px] text-[#4A5568] w-4">{i + 1}</span>
-              <span className="flex-1 text-slate-300 truncate">{d}</span>
-              <span className="dato text-slate-400">{n}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <DistritosCalientes eventos={eventos} />
 
       <div className="border-t border-white/5 pt-4 space-y-2">
         <h3 className="display text-[12px] text-[#7C8AA0]">Cómo se calcula la gravedad</h3>

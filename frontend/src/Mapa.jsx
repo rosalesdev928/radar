@@ -1,18 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents, useMap } from 'react-leaflet';
 import { TEMAS } from './tema';
 import L from 'leaflet';
 import { svgDe, COLORES, ETIQUETAS } from './iconos';
 import { ABREV, fechaHora } from './formato';
  
 const CENTRO = [-12.0464, -77.0428];
+const RADIO_CERCANIA = 2000; // metros
 const ZOOM_ETIQUETAS = 14;
 const ZOOM_DETALLE = 16;
  
-function iconoEvento(evento, conEtiqueta, esNuevo) {
+function iconoEvento(evento, conEtiqueta, esNuevo, cerca) {
   const activo = evento.estado === 'atendiendo';
   const color = COLORES[evento.tipo] ?? COLORES.otro;
-  const brillo = esNuevo ? 'recien' : '';
+  const brillo = [esNuevo ? 'recien' : '', cerca ? 'cerca-de-mi' : ''].filter(Boolean).join(' ');
   const grave = evento.relevancia === 'alta';
   const leve = evento.relevancia === 'baja';
  
@@ -90,7 +91,7 @@ function BotonUbicacion({ posicion, onPedir }) {
   );
 }
  
-function Marcadores({ eventos, conEtiqueta, seleccionado, onLimpiar, nuevos, onAbrirChat }) {
+function Marcadores({ eventos, conEtiqueta, seleccionado, onLimpiar, nuevos, onAbrirChat, cercanos }) {
   const map = useMap();
   const marcadores = useRef({});
  
@@ -125,7 +126,7 @@ function Marcadores({ eventos, conEtiqueta, seleccionado, onLimpiar, nuevos, onA
     <Marker
       key={e.id}
       position={[e.lat, e.lon]}
-      icon={iconoEvento(e, conEtiqueta, nuevos?.has(e.id))}
+      icon={iconoEvento(e, conEtiqueta, nuevos?.has(e.id), cercanos?.has(e.id))}
       ref={(r) => {
         if (r) marcadores.current[e.id] = r;
       }}
@@ -142,6 +143,13 @@ function Marcadores({ eventos, conEtiqueta, seleccionado, onLimpiar, nuevos, onA
             {e.estado === 'atendiendo' && ' · en curso'}
           </div>
  
+          {cercanos?.has(e.id) && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#35A7FF] animate-pulse" />
+              <span className="dato text-[9.5px] text-[#35A7FF]">A menos de 2 km de ti</span>
+            </div>
+          )}
+
           <p className="text-[13px] leading-snug mb-1 text-slate-100">{e.descripcion}</p>
           <p className="text-[11px] text-slate-400 mb-2.5">{e.distrito}</p>
  
@@ -201,15 +209,68 @@ export default function Mapa({
 }) {
   const [zoom, setZoom] = useState(11);
   const [miPos, setMiPos] = useState(null);
- 
+  const [precision, setPrecision] = useState(null);
+  const vigilanciaRef = useRef(null);
+
+  /**
+   * Una sola lectura deja la posición congelada: si te mueves, el radio de
+   * proximidad miente. `watchPosition` la mantiene viva mientras la pestaña
+   * esté abierta.
+   */
   function pedirUbicacion() {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (p) => setMiPos([p.coords.latitude, p.coords.longitude]),
-      () => {},
-      { enableHighAccuracy: true, timeout: 8000 }
+
+    // Segundo toque: dejar de seguir
+    if (vigilanciaRef.current != null) {
+      navigator.geolocation.clearWatch(vigilanciaRef.current);
+      vigilanciaRef.current = null;
+      setMiPos(null);
+      setPrecision(null);
+      return;
+    }
+
+    vigilanciaRef.current = navigator.geolocation.watchPosition(
+      (p) => {
+        setMiPos([p.coords.latitude, p.coords.longitude]);
+        setPrecision(p.coords.accuracy ?? null);
+      },
+      () => {
+        vigilanciaRef.current = null;
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
     );
   }
+
+  useEffect(() => {
+    return () => {
+      if (vigilanciaRef.current != null) {
+        navigator.geolocation.clearWatch(vigilanciaRef.current);
+      }
+    };
+  }, []);
+
+  /** Distancia en metros entre dos puntos (fórmula del haversine). */
+  const cercanos = useMemo(() => {
+    if (!miPos) return new Set();
+    const [lat1, lon1] = miPos;
+    const R = 6371000;
+    const rad = (g) => (g * Math.PI) / 180;
+
+    const ids = new Set();
+    for (const e of eventos) {
+      if (!e.coordenadas_validas) continue;
+      const lat2 = e.lat;
+      const lon2 = e.lon ?? e.lng;
+      const dLat = rad(lat2 - lat1);
+      const dLon = rad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+      const d = 2 * R * Math.asin(Math.sqrt(a));
+      if (d <= RADIO_CERCANIA) ids.add(e.id);
+    }
+    return ids;
+  }, [miPos, eventos]);
  
   const visibles = eventos.filter(
     (e) => e.coordenadas_validas && (mostrarCerrados || e.estado === 'atendiendo')
@@ -231,6 +292,31 @@ export default function Mapa({
       <BotonUbicacion posicion={miPos} onPedir={pedirUbicacion} />
  
       {miPos && (
+        <>
+          {/* Radio de proximidad: qué cuenta como "cerca de ti" */}
+          <Circle
+            center={miPos}
+            radius={RADIO_CERCANIA}
+            pathOptions={{
+              color: '#35A7FF',
+              weight: 1,
+              opacity: 0.45,
+              fillColor: '#35A7FF',
+              fillOpacity: 0.05,
+            }}
+          />
+          {/* Precisión real del GPS, si es peor que el propio punto */}
+          {precision > 60 && (
+            <Circle
+              center={miPos}
+              radius={precision}
+              pathOptions={{ color: '#35A7FF', weight: 0, fillColor: '#35A7FF', fillOpacity: 0.1 }}
+            />
+          )}
+        </>
+      )}
+
+      {miPos && (
         <Marker
           position={miPos}
           icon={L.divIcon({
@@ -244,6 +330,7 @@ export default function Mapa({
  
       <Marcadores
         eventos={visibles}
+        cercanos={cercanos}
         conEtiqueta={zoom >= ZOOM_ETIQUETAS}
         seleccionado={seleccionado}
         onLimpiar={onLimpiar}

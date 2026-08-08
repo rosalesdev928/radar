@@ -179,6 +179,18 @@ body {
   .fondo-liquido { filter: blur(40px) contrast(6); opacity: 0.35; }
 }
 
+/* ---- Eventos dentro de tu radio ---- */
+@keyframes latir-cerca {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(53,167,255,0.55); }
+  50%      { box-shadow: 0 0 0 9px rgba(53,167,255,0); }
+}
+
+.cerca-de-mi { animation: latir-cerca 2.2s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cerca-de-mi { animation: none; outline: 2px solid rgba(53,167,255,0.6); }
+}
+
 @keyframes bajar {
   from { opacity: 0; transform: translateY(-14px) scale(0.97); }
   to   { opacity: 1; transform: none; }
