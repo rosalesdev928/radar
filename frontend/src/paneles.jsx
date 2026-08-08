@@ -274,6 +274,9 @@ export function Ajustes({
   alertas,
   onToggleAlertas,
   permiso,
+  registrando,
+  errorAviso,
+  enBandeja = 0,
 }) {
   const bloqueado = permiso === 'denied';
   const sinSoporte = permiso === 'no-soportado';
@@ -318,12 +321,12 @@ export function Ajustes({
 
         <button
           onClick={onToggleAlertas}
-          disabled={!miDistrito || bloqueado || sinSoporte}
+          disabled={!miDistrito || bloqueado || sinSoporte || registrando}
           className="w-full bg-[#161F2F] rounded-xl px-4 py-3 mt-2 flex items-center
                      justify-between disabled:opacity-45"
         >
           <span className="text-[13.5px] text-left">
-            Avisarme de emergencias aquí
+            {registrando ? 'Registrando…' : 'Avisarme de emergencias aquí'}
           </span>
           <Interruptor activo={alertas} />
         </button>
@@ -348,10 +351,16 @@ export function Ajustes({
           </p>
         )}
 
-        {alertas && miDistrito && (
+        {errorAviso && (
+          <p className="text-[11px] text-[#FF3B30] mt-1.5 px-1 leading-relaxed">
+            No se pudo registrar el aviso. {errorAviso}
+          </p>
+        )}
+
+        {alertas && miDistrito && !errorAviso && (
           <p className="text-[11px] text-emerald-400/80 mt-1.5 px-1 leading-relaxed">
-            Te avisaremos cuando entre una emergencia en {miDistrito}. Funciona
-            con la app abierta o en segundo plano.
+            Registrado. Te avisaremos cuando entre una emergencia en {miDistrito}.
+            {enBandeja > 0 && ` Tienes ${enBandeja} sin leer.`}
           </p>
         )}
       </div>

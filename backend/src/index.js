@@ -6,6 +6,8 @@ const { DetectorDeCambios } = require('./detector');
 const { PortalPublisher } = require('./portal');
 const { clasificar } = require('./agente');
 const { analizarHilo } = require('./analista');
+const { RegistroDeSuscripciones } = require('./suscripciones');
+const { Avisador } = require('./avisos');
 const { esDeLima, slug, normalizar } = require('./distritos');
 
 const CIUDAD = process.env.CIUDAD || 'radar';
@@ -24,11 +26,17 @@ const CONFIG = {
 
 const portal = new PortalPublisher({ secretKey: process.env.PORTAL_SECRET });
 const detector = new DetectorDeCambios();
+const registro = new RegistroDeSuscripciones({
+  secretKey: process.env.PORTAL_SECRET,
+  canal: `${CIUDAD}:suscripciones`,
+});
+const avisador = new Avisador({ secretKey: process.env.PORTAL_SECRET });
 const cache = new Map(); // id -> evento clasificado
 
 const estadisticas = {
   ciclos: 0,
   publicados: 0,
+  avisados: 0,
   ultimoCiclo: null,
   ultimoError: null,
 };
@@ -41,6 +49,10 @@ async function ejecutarCiclo() {
     const deLima = todos.filter((e) => e.distrito && esDeLima(e.distrito));
     const { nuevos, actualizados } = detector.procesar(deLima);
     const aPublicar = [...nuevos, ...actualizados];
+
+    // Solo avisamos por partes nuevos. Un cambio de estado en uno ya
+    // conocido no merece volver a sonar en el bolsillo de nadie.
+    const idsNuevos = new Set(nuevos.map((e) => e.id));
 
     if (!aPublicar.length) {
       estadisticas.ultimoCiclo = new Date().toISOString();
@@ -63,6 +75,11 @@ async function ejecutarCiclo() {
       await portal.publicar(ev, CONFIG.canalGlobal);
 
       cache.set(ev.id, ev);
+
+      if (idsNuevos.has(ev.id)) {
+        const avisados = await avisador.avisarDelEvento(ev, registro);
+        estadisticas.avisados += avisados;
+      }
 
       // Pausa para no saturar Portal en el ciclo inicial (~111 eventos)
       await new Promise((r) => setTimeout(r, 100));
@@ -122,6 +139,9 @@ app.get('/', (_, res) => {
     distritosConEventos: distritos.length,
     eventosEnCache: cache.size,
     ia: CONFIG.ia.aiEnabled ? 'activa' : 'bypass',
+    suscriptores: registro.total,
+    porDistrito: registro.resumen(),
+    avisos: avisador.estadisticas(),
     ...estadisticas,
   });
 });
@@ -171,6 +191,74 @@ app.post('/analizar', async (req, res) => {
   }
 });
 
+/**
+ * Acuña un JWT de Portal para un dispositivo.
+ *
+ * Esto NO es un login: el frontend genera un id local (localStorage) y lo
+ * cambia por un token. Sirve para que Portal trate al visitante como usuario
+ * con identidad estable, que es requisito para que la bandeja funcione —
+ * los usuarios anónimos tienen la bandeja permanentemente vacía.
+ *
+ * El token dura poco a propósito: el cliente lo re-pide solo al expirar.
+ */
+app.post('/token', async (req, res) => {
+  const { dispositivo } = req.body ?? {};
+
+  if (typeof dispositivo !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(dispositivo)) {
+    return res.status(400).json({ error: 'dispositivo_invalido' });
+  }
+
+  const userId = `radar_${dispositivo}`;
+
+  try {
+    const r = await fetch('https://api.useportal.co/v1/tokens', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.PORTAL_SECRET}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, ttl: '2h', claims: { app: 'radar' } }),
+    });
+
+    if (!r.ok) {
+      const texto = await r.text();
+      console.error(`[token] ✗ Portal ${r.status}: ${texto.slice(0, 160)}`);
+      return res.status(502).json({ error: 'portal_rechazo_el_token' });
+    }
+
+    const data = await r.json();
+    res.json({ token: data.token, expiraEn: data.expiresAt, userId });
+  } catch (err) {
+    console.error(`[token] ✗ ${err.message}`);
+    res.status(500).json({ error: 'no_se_pudo_acunar' });
+  }
+});
+
+/**
+ * Alta o baja de avisos por distrito.
+ * El frontend manda su userId de Portal (anon_...) y el distrito elegido.
+ * Mandar distrito null da de baja.
+ */
+app.post('/suscribir', async (req, res) => {
+  const { userId, distrito } = req.body ?? {};
+
+  if (typeof userId !== 'string' || !userId.trim()) {
+    return res.status(400).json({ error: 'Falta userId' });
+  }
+
+  if (distrito != null && (typeof distrito !== 'string' || !esDeLima(distrito))) {
+    return res.status(400).json({ error: 'Distrito fuera de Lima Metropolitana' });
+  }
+
+  try {
+    const r = await registro.registrar(userId.trim(), distrito || null);
+    res.json({ ...r, distrito: distrito || null, suscriptores: registro.total });
+  } catch (err) {
+    console.error(`[suscribir] ✗ ${err.message}`);
+    res.status(500).json({ error: 'no_se_pudo_registrar' });
+  }
+});
+
 app.get('/salud', (_, res) => res.json({ ok: true }));
 
 app.listen(CONFIG.puerto, '0.0.0.0', () => {
@@ -180,6 +268,10 @@ app.listen(CONFIG.puerto, '0.0.0.0', () => {
   console.log(`   Canales por distrito: ${CONFIG.ciudad}:<distrito>`);
   console.log(`   IA: ${CONFIG.ia.aiEnabled ? 'activa' : 'BYPASS'}\n`);
 
-  ejecutarCiclo();
-  setInterval(ejecutarCiclo, CONFIG.intervalo * 1000);
+  // El registro se reconstruye del canal antes del primer ciclo, para no
+  // perder suscriptores cada vez que Render reinicia el proceso.
+  registro.cargar().then(() => {
+    ejecutarCiclo();
+    setInterval(ejecutarCiclo, CONFIG.intervalo * 1000);
+  });
 });

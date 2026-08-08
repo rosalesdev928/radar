@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Portal } from '@portalsdk/core';
-import { PortalProvider, useChannel } from '@portalsdk/react';
+import { PortalProvider, useChannel, useInbox } from '@portalsdk/react';
 import Mapa from './Mapa';
 import ChatEvento from './ChatEvento';
 import { Filtros, Listado, Estadisticas, Ajustes } from './paneles';
@@ -16,6 +16,7 @@ import {
   notificar,
   normalizar,
 } from './alertas';
+import { pedirToken, suscribir } from './identidad';
 import { aFecha, haceCuanto } from './formato';
 
 const CANAL = import.meta.env.VITE_PORTAL_CHANNEL;
@@ -220,29 +221,6 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
 
     if (recien.length) {
       setNuevos(new Set(recien));
-
-      /* ¿Alguno cayó en el distrito del usuario? */
-      const { distrito, alertas: activas } = prefs.current;
-      if (activas && distrito) {
-        const cerca = eventos.filter(
-          (e) => recien.includes(e.id) && normalizar(e.distrito) === normalizar(distrito)
-        );
-
-        if (cerca.length) {
-          const principal = cerca[0];
-          setAviso({ evento: principal, extras: cerca.length - 1 });
-
-          notificar({
-            titulo:
-              cerca.length > 1
-                ? `${cerca.length} emergencias en ${distrito}`
-                : `Emergencia en ${distrito}`,
-            cuerpo: principal.descripcion,
-            tag: `radar-${principal.id}`,
-          });
-        }
-      }
-
       const t = setTimeout(() => setNuevos(new Set()), 9000);
       return () => clearTimeout(t);
     }
@@ -253,6 +231,29 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     return () => clearInterval(i);
   }, []);
 
+  /**
+   * Los avisos de zona llegan por la bandeja de Portal, no por el diff local:
+   * el backend decide a quién le toca y manda un ítem por usuario suscrito.
+   * `onItem` dispara una sola vez por ítem — su id es la clave de idempotencia,
+   * así que una reentrega no vuelve a sonar.
+   */
+  const { counter } = useInbox({
+    onItem: (item) => {
+      if (item.type !== 'radar.emergencia') return;
+
+      const e = item.data ?? {};
+      setAviso({ evento: e, extras: 0 });
+
+      if (prefs.current.alertas) {
+        notificar({
+          titulo: item.title ?? `Emergencia en ${e.distrito ?? 'tu zona'}`,
+          cuerpo: e.descripcion ?? '',
+          tag: `radar-${e.id ?? item.id}`,
+        });
+      }
+    },
+  });
+
   /* El aviso se retira solo a los 14 s */
   useEffect(() => {
     if (!aviso) return;
@@ -260,26 +261,68 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     return () => clearTimeout(t);
   }, [aviso]);
 
+  const [registrando, setRegistrando] = useState(false);
+  const [errorAviso, setErrorAviso] = useState(null);
+
   /* Al activar los avisos pedimos permiso: va dentro de un clic del usuario */
   async function alternarAlertas() {
+    setErrorAviso(null);
+
     if (alertas) {
       setAlertas(false);
       guardarAlertas(false);
+      setRegistrando(true);
+      try {
+        await suscribir(null); // baja en el backend
+      } catch (e) {
+        setErrorAviso(e.message);
+      } finally {
+        setRegistrando(false);
+      }
       return;
     }
+
     const res = await pedirPermiso();
     setPermiso(res);
     const ok = res === 'granted' || res === 'no-soportado';
-    setAlertas(ok);
-    guardarAlertas(ok);
+
+    if (!ok) return;
+
+    setRegistrando(true);
+    try {
+      await suscribir(miDistrito);
+      setAlertas(true);
+      guardarAlertas(true);
+    } catch (e) {
+      // Sin registro en el backend no llegaría ningún aviso: no lo damos
+      // por activado solo porque el navegador dijo que sí.
+      setErrorAviso(e.message);
+      setAlertas(false);
+      guardarAlertas(false);
+    } finally {
+      setRegistrando(false);
+    }
   }
 
-  function cambiarDistrito(d) {
+  async function cambiarDistrito(d) {
     setMiDistrito(d);
     guardarDistrito(d);
+    setErrorAviso(null);
+
     if (!d) {
       setAlertas(false);
       guardarAlertas(false);
+    }
+
+    if (!alertas) return;
+
+    setRegistrando(true);
+    try {
+      await suscribir(d);
+    } catch (e) {
+      setErrorAviso(e.message);
+    } finally {
+      setRegistrando(false);
     }
   }
 
@@ -399,6 +442,9 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
                 alertas={alertas}
                 onToggleAlertas={alternarAlertas}
                 permiso={permiso}
+                registrando={registrando}
+                errorAviso={errorAviso}
+                enBandeja={counter}
               />
             )}
             {verMapa && (
@@ -534,7 +580,7 @@ export default function App() {
   }
 
   return (
-    <PortalProvider client={portal}>
+    <PortalProvider client={portal} token={pedirToken}>
       <Vista
         usuario={sesion.usuario}
         onSalir={salir}
