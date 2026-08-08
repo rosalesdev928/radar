@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "@portalsdk/config": "^0.2.1"
+  }
+}
