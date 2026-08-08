@@ -379,7 +379,9 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
 
   function irAlMapa(evento) {
     setSeleccionado(evento);
-    setSeccion('mapa');
+    // Un parte sin GPS no se puede señalar en el mapa: llevarlo allí dejaría
+    // al usuario mirando una pantalla donde no pasa nada.
+    setSeccion(evento?.coordenadas_validas === false ? 'listado' : 'mapa');
   }
 
   function cambiarFiltro(nuevo) {
@@ -526,7 +528,12 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
         aviso={aviso}
         onCerrar={() => setAviso(null)}
         onAbrir={(e) => {
-          irAlMapa(e);
+          // El aviso llega desde la bandeja con los datos que empaquetó el
+          // backend, sin `coordenadas_validas` ni `lon`. El mapa necesita el
+          // evento completo, así que lo buscamos en la lista ya cargada y
+          // solo usamos el payload como respaldo.
+          const completo = eventos.find((x) => x.id === e.id) ?? e;
+          irAlMapa(completo);
           setAviso(null);
         }}
       />
