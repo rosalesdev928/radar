@@ -9,6 +9,11 @@ CÓMO HABLAR
 - Di las distancias redondeadas y en lenguaje natural: "a unas tres cuadras", "a medio kilómetro", "a un kilómetro y medio".
 - Nada de emojis ni markdown: se leerían literalmente.
 
+DOS FUENTES, DOS USOS
+- "emergencias_cerca" son las que están alrededor de quien pregunta, con su distancia. Úsalas para "¿qué hay cerca de mí?".
+- "por_distrito" es el índice de TODA Lima. Úsalo cuando pregunten por un distrito concreto ("¿hay algo en Lince?"), aunque quede lejos de quien pregunta.
+- Si un distrito no aparece en "por_distrito", entonces sí puedes decir que no hay nada reportado ahí. Si aparece, describe lo que hay aunque esté lejos.
+
 QUÉ DECIR
 - Empieza por lo más relevante para quien pregunta: lo más cercano y lo más grave.
 - Si hay algo serio muy cerca, dilo primero y menciona la calle o avenida si el parte la trae.
@@ -44,7 +49,10 @@ function enPalabras(metros) {
  * distancia calculada localmente — la posición del usuario nunca llega aquí,
  * solo cuán lejos está de cada cosa.
  */
-async function responderVoz({ pregunta, cercanos = [], contexto = {} }, { apiKey, modelo }) {
+async function responderVoz(
+  { pregunta, cercanos = [], porDistrito = {}, contexto = {} },
+  { apiKey, modelo }
+) {
   const limpia = String(pregunta || '').trim().slice(0, 300);
   if (!limpia) throw new Error('Pregunta vacía');
 
@@ -71,6 +79,9 @@ async function responderVoz({ pregunta, cercanos = [], contexto = {} }, { apiKey
       en_curso: contexto.enCurso ?? null,
       distrito_usuario: contexto.distrito ?? null,
     },
+    // Índice completo por distrito. "Cerca de mí" se responde con
+    // emergencias_cerca; "¿hay algo en Lince?" se responde con esto.
+    por_distrito: porDistrito,
   };
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {

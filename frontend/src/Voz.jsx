@@ -41,6 +41,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
 
   const recRef = useRef(null);
   const finalRef = useRef('');
+  const desbloqueadoRef = useRef(false);
 
   const decir = useCallback((texto) => {
     if (!window.speechSynthesis) return;
@@ -83,11 +84,27 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
           .slice(0, 12);
       }
 
+      /* Además de lo cercano, un índice de TODA la ciudad agrupado por
+         distrito. Sin esto, preguntar "¿hay algo en Lince?" desde Villa El
+         Salvador daba "no hay nada" — y era falso: el evento existía, pero
+         estaba a 20 km y el filtro de proximidad lo había descartado. */
+      const porDistrito = {};
+      for (const e of eventos) {
+        if (!e.distrito) continue;
+        (porDistrito[e.distrito] ??= []).push({
+          tipo: e.tipo,
+          descripcion: e.descripcion,
+          gravedad: e.relevancia,
+          estado: e.estado,
+          hora: e.hora,
+        });
+      }
+
       try {
         const r = await fetch(`${BACKEND}/voz`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pregunta, cercanos, contexto }),
+          body: JSON.stringify({ pregunta, cercanos, porDistrito, contexto }),
         });
 
         const j = await r.json();
@@ -104,7 +121,27 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
     [eventos, posicion, contexto, decir, onMencionar]
   );
 
+  /**
+   * iOS solo permite hablar si `speak()` nace de un gesto del usuario. El
+   * nuestro ocurre después del fetch, cuando Safari ya perdió ese contexto.
+   * Lanzar aquí una locución muda —dentro del toque— deja el motor
+   * desbloqueado para el resto de la sesión.
+   */
+  const desbloquearVoz = useCallback(() => {
+    if (desbloqueadoRef.current || !window.speechSynthesis) return;
+    try {
+      const mudo = new SpeechSynthesisUtterance(' ');
+      mudo.volume = 0;
+      window.speechSynthesis.speak(mudo);
+      desbloqueadoRef.current = true;
+    } catch {
+      /* si no se puede, seguimos: en escritorio no hace falta */
+    }
+  }, []);
+
   const escuchar = useCallback(() => {
+    desbloquearVoz();
+
     // Si está hablando, el toque la calla: nadie quiere esperar a que termine
     if (estado === 'hablando') {
       window.speechSynthesis.cancel();
@@ -159,7 +196,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
     } catch {
       setEstado('listo');
     }
-  }, [estado, consultar]);
+  }, [estado, consultar, desbloquearVoz]);
 
   /* El navegador carga las voces de forma asíncrona; sin esto, la primera
      consulta puede salir con la voz por defecto en inglés. */
@@ -185,7 +222,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
       {/* Panel de conversación */}
       {(transcripcion || respuesta || error) && (
         <div
-          className="absolute z-[900] left-3 right-3 bottom-[5.5rem] lg:left-auto lg:right-4
+          className="absolute z-[900] left-3 right-3 bottom-[11rem] lg:left-auto lg:right-4
                      lg:w-[340px] rounded-2xl border border-white/12 bg-[#0B1120]/95
                      backdrop-blur-md shadow-2xl shadow-black/60 px-4 py-3"
         >
@@ -228,7 +265,7 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
         onClick={escuchar}
         disabled={pensando}
         aria-label="Preguntar por voz"
-        className={`absolute z-[900] right-4 bottom-[3.25rem] w-12 h-12 rounded-full grid
+        className={`absolute z-[900] right-4 bottom-[7.5rem] w-12 h-12 rounded-full grid
                     place-items-center shadow-lg shadow-black/50 transition
                     disabled:opacity-60 ${
                       oyendo

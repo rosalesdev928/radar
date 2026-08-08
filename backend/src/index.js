@@ -331,7 +331,7 @@ app.post('/suscribir', async (req, res) => {
  * al servidor, únicamente las distancias ya resueltas.
  */
 app.post('/voz', limiteVoz, async (req, res) => {
-  const { pregunta, cercanos, contexto } = req.body ?? {};
+  const { pregunta, cercanos, porDistrito, contexto } = req.body ?? {};
 
   if (typeof pregunta !== 'string' || !pregunta.trim()) {
     return res.status(400).json({ error: 'falta_pregunta' });
@@ -366,8 +366,22 @@ app.post('/voz', limiteVoz, async (req, res) => {
 
   try {
     presupuesto.consumir();
+    // El índice por distrito lo armamos aquí desde la caché propia: así el
+    // cliente no puede inyectar eventos inventados en el prompt.
+    const indice = {};
+    for (const e of cache.values()) {
+      if (!e.distrito) continue;
+      (indice[e.distrito] ??= []).push({
+        tipo: e.tipo,
+        descripcion: e.descripcion,
+        gravedad: e.relevancia,
+        estado: e.estado,
+        hora: e.hora,
+      });
+    }
+
     const salida = await responderVoz(
-      { pregunta, cercanos: verificados, contexto },
+      { pregunta, cercanos: verificados, porDistrito: indice, contexto },
       CONFIG.ia
     );
     res.json(salida);
