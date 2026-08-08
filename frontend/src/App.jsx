@@ -17,6 +17,8 @@ import {
   normalizar,
 } from './alertas';
 import { pedirToken, suscribir } from './identidad';
+import { leerTema, guardarTema } from './tema';
+import Fondo from './fondo';
 import { aFecha, haceCuanto } from './formato';
 
 const CANAL = import.meta.env.VITE_PORTAL_CHANNEL;
@@ -49,56 +51,84 @@ const SECCIONES = [
 /* ---------- Pantalla de entrada ---------- */
 function Entrada({ onEntrar, instalable, onInstalar }) {
   const [nombre, setNombre] = useState('');
+  const limpio = nombre.trim();
 
   return (
-    <div className="h-full w-full flex flex-col justify-center px-7 max-w-md mx-auto bg-[#0B1120]
-                    pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <div className="dato text-[10px] tracking-[0.25em] text-[#FF3B30] mb-2">
-        EMERGENCIAS 116
-      </div>
-      <h1 className="display text-[54px] leading-[0.9] font-bold mb-3">Radar</h1>
-      <p className="text-[14px] text-[#7C8AA0] leading-relaxed mb-9">
-        Emergencias reales de Lima Metropolitana, en el mapa, mientras ocurren.
-        Datos oficiales del Cuerpo General de Bomberos del Perú.
-      </p>
+    <div className="relative h-full w-full overflow-hidden bg-[#080D16]">
+      <Fondo />
 
-      <label className="dato text-[10px] tracking-wider text-[#7C8AA0] mb-2 block">
-        TU NOMBRE
-      </label>
-      <input
-        value={nombre}
-        onChange={(e) => setNombre(e.target.value.slice(0, 20))}
-        onKeyDown={(e) => e.key === 'Enter' && nombre.trim() && onEntrar(nombre.trim())}
-        placeholder="Cómo te vean los demás"
-        className="w-full bg-[#161F2F] border border-white/10 rounded-xl px-4 py-3.5 text-[15px]
-                   placeholder:text-[#4A5568] outline-none focus:border-[#FF3B30]/60 transition"
-      />
+      {/* Velo para que el texto siempre tenga contraste sobre el fondo vivo */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[#080D16]/60 via-[#080D16]/75 to-[#080D16]" />
 
-      <button
-        onClick={() => nombre.trim() && onEntrar(nombre.trim())}
-        disabled={!nombre.trim()}
-        className="mt-3 w-full bg-[#FF3B30] disabled:bg-[#2A3547] disabled:text-[#7C8AA0]
-                   text-white display font-bold text-[16px] py-3.5 rounded-xl transition"
+      <div
+        className="relative h-full w-full flex flex-col justify-center px-7 max-w-md mx-auto
+                   pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
       >
-        Entrar al mapa
-      </button>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#FF3B30] animate-pulse" />
+          <span className="dato text-[10px] tracking-[0.25em] text-[#FF3B30]">
+            EMERGENCIAS 116
+          </span>
+        </div>
 
-      <button
-        onClick={() => onEntrar(null)}
-        className="mt-2.5 w-full text-[#7C8AA0] text-[13px] py-2 hover:text-slate-300 transition"
-      >
-        Entrar sin nombre
-      </button>
+        <h1 className="display text-[64px] leading-[0.85] font-bold mb-4 tracking-tight">
+          Radar
+        </h1>
 
-      {instalable && !esModoApp() && (
-        <button
-          onClick={onInstalar}
-          className="mt-7 w-full border border-white/15 text-slate-300 text-[13px] py-3 rounded-xl
-                     hover:bg-white/5 transition"
+        <p className="text-[14.5px] text-slate-300/90 leading-relaxed mb-9 max-w-[30ch]">
+          Emergencias reales de Lima Metropolitana, en el mapa, mientras ocurren.
+          Datos oficiales del Cuerpo General de Bomberos del Perú.
+        </p>
+
+        <label
+          htmlFor="nombre"
+          className="dato text-[10px] tracking-wider text-[#7C8AA0] mb-2 block"
         >
-          Instalar Radar en este dispositivo
+          TU NOMBRE
+        </label>
+        <input
+          id="nombre"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value.slice(0, 20))}
+          onKeyDown={(e) => e.key === 'Enter' && limpio && onEntrar(limpio)}
+          placeholder="Cómo te vean los demás"
+          autoComplete="off"
+          className="w-full bg-white/[0.06] backdrop-blur-md border border-white/15 rounded-xl
+                     px-4 py-3.5 text-[15px] placeholder:text-[#4A5568] outline-none
+                     focus:border-[#FF3B30]/70 focus:bg-white/[0.09] transition"
+        />
+
+        <button
+          onClick={() => limpio && onEntrar(limpio)}
+          disabled={!limpio}
+          className="mt-3 w-full bg-[#FF3B30] hover:bg-[#FF4F45] disabled:bg-white/[0.07]
+                     disabled:text-[#7C8AA0] disabled:hover:bg-white/[0.07]
+                     text-white display font-bold text-[16px] py-3.5 rounded-xl transition"
+        >
+          Entrar al mapa
         </button>
-      )}
+
+        <button
+          onClick={() => onEntrar(null)}
+          className="mt-2.5 w-full text-[#7C8AA0] text-[13px] py-2 hover:text-slate-200 transition"
+        >
+          Entrar sin nombre
+        </button>
+
+        {instalable && !esModoApp() && (
+          <button
+            onClick={onInstalar}
+            className="mt-7 w-full border border-white/15 bg-white/[0.03] backdrop-blur-md
+                       text-slate-300 text-[13px] py-3 rounded-xl hover:bg-white/[0.08] transition"
+          >
+            Instalar Radar en este dispositivo
+          </button>
+        )}
+
+        <p className="dato text-[9.5px] text-[#4A5568] text-center mt-7 leading-relaxed">
+          Radar no reemplaza al 116. Ante una emergencia, llama.
+        </p>
+      </div>
     </div>
   );
 }
@@ -173,6 +203,7 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const [seccion, setSeccion] = useState('mapa');
   const [filtro, setFiltro] = useState('todos');
   const [mostrarCerrados, setMostrarCerrados] = useState(true);
+  const [tema, setTema] = useState(() => leerTema());
   const [seleccionado, setSeleccionado] = useState(null);
   const [chat, setChat] = useState(null);
 
@@ -302,6 +333,11 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     } finally {
       setRegistrando(false);
     }
+  }
+
+  function cambiarTema(t) {
+    setTema(t);
+    guardarTema(t);
   }
 
   async function cambiarDistrito(d) {
@@ -445,6 +481,8 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
                 registrando={registrando}
                 errorAviso={errorAviso}
                 enBandeja={counter}
+                tema={tema}
+                onCambiarTema={cambiarTema}
               />
             )}
             {verMapa && (
@@ -457,6 +495,7 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
         <main className={`${verMapa ? 'block' : 'hidden'} lg:block flex-1 min-h-0 relative`}>
           <Mapa
             eventos={filtrados}
+            tema={tema}
             mostrarCerrados={mostrarCerrados}
             seccion={seccion}
             seleccionado={seleccionado}

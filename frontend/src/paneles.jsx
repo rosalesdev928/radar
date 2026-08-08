@@ -1,5 +1,6 @@
 import { COLORES, ETIQUETAS, svgDe } from './iconos';
 import { DISTRITOS } from './alertas';
+import { TEMAS } from './tema';
 import { ABREV, fechaHora } from './formato';
 
 const TIPOS = [
@@ -277,6 +278,8 @@ export function Ajustes({
   registrando,
   errorAviso,
   enBandeja = 0,
+  tema = 'oscuro',
+  onCambiarTema,
 }) {
   const bloqueado = permiso === 'denied';
   const sinSoporte = permiso === 'no-soportado';
@@ -368,6 +371,44 @@ export function Ajustes({
       {/* ----- Mapa ----- */}
       <div>
         <h3 className="display text-[12px] text-[#7C8AA0] mb-2">Mapa</h3>
+
+        <div className="bg-[#161F2F] rounded-xl px-4 py-3 mb-2">
+          <span className="text-[13.5px] block mb-2.5">Estilo del mapa</span>
+          <div className="grid grid-cols-2 gap-2">
+            {Object.entries(TEMAS).map(([clave, t]) => {
+              const activo = tema === clave;
+              const oscuro = clave === 'oscuro';
+              return (
+                <button
+                  key={clave}
+                  onClick={() => onCambiarTema?.(clave)}
+                  className={`rounded-lg border overflow-hidden transition ${
+                    activo
+                      ? 'border-[#FF3B30] ring-1 ring-[#FF3B30]/40'
+                      : 'border-white/10 hover:border-white/25'
+                  }`}
+                >
+                  <span
+                    className="block h-11 w-full"
+                    style={{
+                      background: oscuro
+                        ? 'linear-gradient(135deg,#1B2430 0%,#0E1620 100%)'
+                        : 'linear-gradient(135deg,#F4F1EC 0%,#DCE3E8 100%)',
+                    }}
+                  />
+                  <span
+                    className={`block text-[11.5px] py-1.5 ${
+                      activo ? 'text-slate-100' : 'text-[#7C8AA0]'
+                    }`}
+                  >
+                    {t.nombre}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <button
           onClick={onToggleCerrados}
           className="w-full bg-[#161F2F] rounded-xl px-4 py-3 flex items-center justify-between"

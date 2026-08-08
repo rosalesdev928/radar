@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents, useMap } from 'react-leaflet';
+import { TEMAS } from './tema';
 import L from 'leaflet';
 import { svgDe, COLORES, ETIQUETAS } from './iconos';
 import { ABREV, fechaHora } from './formato';
@@ -196,6 +197,7 @@ export default function Mapa({
   onLimpiar,
   nuevos,
   onAbrirChat,
+  tema = 'oscuro',
 }) {
   const [zoom, setZoom] = useState(11);
   const [miPos, setMiPos] = useState(null);
@@ -215,9 +217,12 @@ export default function Mapa({
  
   return (
     <MapContainer center={CENTRO} zoom={11} className="h-full w-full" zoomControl={false}>
+      {/* La `key` fuerza a Leaflet a recrear la capa al cambiar de tema:
+          sin ella reutiliza los tiles cacheados y el mapa no cambia. */}
       <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        attribution="&copy; OpenStreetMap &copy; CARTO"
+        key={tema}
+        url={(TEMAS[tema] ?? TEMAS.oscuro).url}
+        attribution={(TEMAS[tema] ?? TEMAS.oscuro).atribucion}
         maxZoom={20}
       />
  
@@ -248,6 +253,3 @@ export default function Mapa({
     </MapContainer>
   );
 }
-
-
-
