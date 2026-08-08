@@ -59,7 +59,7 @@ function Entrada({ onEntrar, instalable, onInstalar }) {
       <Fondo />
 
       {/* Velo para que el texto siempre tenga contraste sobre el fondo vivo */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#080D16]/60 via-[#080D16]/75 to-[#080D16]" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#080D16]/25 via-[#080D16]/50 to-[#080D16]/80" />
 
       <div
         className="relative h-full w-full flex flex-col justify-center px-7 max-w-md mx-auto
