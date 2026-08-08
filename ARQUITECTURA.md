@@ -228,7 +228,30 @@ dispara esa misma cantidad de peticiones. Por eso hay un tope por evento
 (`maxPorEvento`) y una pausa entre envíos. Para más volumen habría que pasar a
 una cola.
 
-El script `backend/carga.js` mide el comportamiento con conexiones concurrentes.
+### Medición
+
+`backend/carga.js` simula el camino completo de un usuario nuevo contra el
+backend: `POST /token` → Express → llamada a Portal → JWT de vuelta. Es el
+trayecto obligatorio de cada persona que abre Radar, y por donde pasarían todos
+a la vez si hubiera un sismo.
+
+Contra el despliegue real en el free tier de Render (una instancia, 512 MB),
+descartando el arranque en frío:
+
+| Usuarios | Concurrencia | Éxito | Mediana | p95 | Máximo | Ritmo |
+| --- | --- | --- | --- | --- | --- | --- |
+| 25 | 10 | 100 % | 583 ms | 992 ms | 1245 ms | 14.5 req/s |
+| 100 | 20 | 100 % | 657 ms | 1231 ms | 1399 ms | 27.5 req/s |
+| 300 | 50 | 100 % | 1600 ms | 2990 ms | 3730 ms | 28.9 req/s |
+
+Sin fallos en ninguno de los tres. El ritmo se estabiliza cerca de 28
+peticiones por segundo: a partir de ahí la instancia satura y el efecto se ve
+en la latencia, no en errores — las peticiones se encolan en vez de caerse.
+
+A 300 usuarios simultáneos el p95 de 3 segundos ya es perceptible al abrir la
+app, pero sigue siendo utilizable. El siguiente paso natural sería cachear los
+tokens por dispositivo para no llamar a Portal en cada apertura, o subir de
+plan: el free tier es el techo, no el código.
 
 ---
 

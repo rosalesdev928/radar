@@ -52,6 +52,16 @@ const estadisticas = {
 async function ejecutarCiclo() {
   estadisticas.ciclos++;
 
+  // El vigilante razona sobre el acumulado del día, no sobre este ciclo, así
+  // que corre siempre — la mayoría de ciclos no traen partes nuevos y antes
+  // se quedaba detrás de la salida temprana, sin ejecutarse nunca.
+  // Si falla, no debe tumbar el ciclo: es una capa opcional.
+  try {
+    await vigilante.revisar([...cache.values()]);
+  } catch (err) {
+    console.error(`[vigilante] ✗ ${err.message}`);
+  }
+
   try {
     const { todos } = await scrapearBomberos();
     const deLima = todos.filter((e) => e.distrito && esDeLima(e.distrito));
@@ -97,13 +107,6 @@ async function ejecutarCiclo() {
     estadisticas.ultimoCiclo = new Date().toISOString();
     estadisticas.ultimoError = null;
 
-    // El vigilante razona sobre el conjunto del día, no sobre este ciclo.
-    // Si falla, no debe tumbar el ciclo: es una capa opcional.
-    try {
-      await vigilante.revisar([...cache.values()]);
-    } catch (err) {
-      console.error(`[vigilante] ✗ ${err.message}`);
-    }
 
     const porDistrito = clasificados.reduce((m, e) => {
       m[e.distrito] = (m[e.distrito] || 0) + 1;
