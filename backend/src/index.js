@@ -9,6 +9,7 @@ const { analizarHilo } = require('./analista');
 const { RegistroDeSuscripciones } = require('./suscripciones');
 const { Avisador } = require('./avisos');
 const { Vigilante } = require('./vigilante');
+const { crearCors, crearLimitador, Presupuesto } = require('./limites');
 const { esDeLima, slug, normalizar } = require('./distritos');
 
 const CIUDAD = process.env.CIUDAD || 'radar';
@@ -127,12 +128,22 @@ async function ejecutarCiclo() {
 const app = express();
 app.use(express.json({ limit: '256kb' }));
 
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
+app.use(
+  crearCors({
+    permitidos: (process.env.ORIGENES_PERMITIDOS || '')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
+  })
+);
+
+/* Freno del endpoint que cuesta dinero. Los números son deliberadamente
+   holgados para un usuario real —abrir varios hilos seguidos es normal— y
+   estrechos para un bucle automatizado. */
+const limiteAnalisis = crearLimitador({ capacidad: 6, porMinuto: 3, nombre: '/analizar' });
+const limiteToken = crearLimitador({ capacidad: 10, porMinuto: 5, nombre: '/token' });
+const presupuesto = new Presupuesto({
+  porHora: parseInt(process.env.IA_LLAMADAS_POR_HORA || '60', 10),
 });
 
 // Cache de analisis por evento: evita re-analizar el mismo hilo sin cambios
@@ -163,6 +174,7 @@ app.get('/', (_, res) => {
     porDistrito: registro.resumen(),
     avisos: avisador.estadisticas(),
     vigilante: vigilante.estadisticas(),
+    presupuestoIA: presupuesto.estado(),
     canalAlertas: `${CONFIG.ciudad}:alertas`,
     ...estadisticas,
   });
@@ -182,11 +194,33 @@ app.get('/eventos', (req, res) => {
  * El frontend manda los mensajes y el conteo de votos porque ya los tiene
  * en memoria via Portal.
  */
-app.post('/analizar', async (req, res) => {
+app.post('/analizar', limiteAnalisis, async (req, res) => {
   const { evento, mensajes, votos, gravedad } = req.body ?? {};
 
   if (!evento?.id || !Array.isArray(mensajes)) {
     return res.status(400).json({ error: 'Faltan evento o mensajes' });
+  }
+
+  // El evento tiene que existir de verdad. Sin esto, la caché de análisis se
+  // indexa por un id que manda el cliente: basta con inventarse uno distinto
+  // en cada petición para saltársela y forzar una llamada a la IA cada vez.
+  const real = cache.get(evento.id);
+  if (!real) {
+    return res.status(404).json({ error: 'evento_desconocido' });
+  }
+
+  if (mensajes.length > 60) {
+    return res.status(413).json({ error: 'hilo_demasiado_largo' });
+  }
+
+  if (!presupuesto.hayMargen()) {
+    presupuesto.rechazar();
+    const { reinicioEnMin } = presupuesto.estado();
+    console.warn('[presupuesto] techo horario alcanzado');
+    return res.status(429).json({
+      error: 'presupuesto_agotado',
+      mensaje: `El análisis con IA alcanzó su límite por hora. Vuelve en ${reinicioEnMin} min.`,
+    });
   }
 
   if (!CONFIG.ia.aiEnabled || !CONFIG.ia.apiKey) {
@@ -204,7 +238,13 @@ app.post('/analizar', async (req, res) => {
   }
 
   try {
-    const resultado = await analizarHilo({ evento, mensajes, votos, gravedad }, CONFIG.ia);
+    presupuesto.consumir();
+    // Analizamos el parte que tenemos nosotros, no el que mandó el cliente:
+    // así nadie puede inyectar una descripción falsa en el prompt.
+    const resultado = await analizarHilo(
+      { evento: real, mensajes, votos, gravedad },
+      CONFIG.ia
+    );
     analisis.set(evento.id, { firma, resultado });
     res.json(resultado);
   } catch (err) {
@@ -223,7 +263,7 @@ app.post('/analizar', async (req, res) => {
  *
  * El token dura poco a propósito: el cliente lo re-pide solo al expirar.
  */
-app.post('/token', async (req, res) => {
+app.post('/token', limiteToken, async (req, res) => {
   const { dispositivo } = req.body ?? {};
 
   if (typeof dispositivo !== 'string' || !/^[A-Za-z0-9_-]{8,64}$/.test(dispositivo)) {
