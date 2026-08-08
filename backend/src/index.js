@@ -43,6 +43,9 @@ const vigilante = new Vigilante({
 });
 const cache = new Map(); // id -> evento clasificado
 
+// El primer ciclo tras arrancar trae el día entero: se trata distinto.
+let primerCiclo = true;
+
 const estadisticas = {
   ciclos: 0,
   publicados: 0,
@@ -79,12 +82,36 @@ async function ejecutarCiclo() {
       return;
     }
 
+    /* El backfill NO pasa por la IA.
+     *
+     * Al reiniciar, la caché arranca vacía y el detector ve los ~95 partes del
+     * día como nuevos. Clasificarlos con IA cuesta unos veinticinco centavos
+     * cada vez, y el free tier de Render reinicia por inactividad, por cada
+     * deploy y por cada cambio de variable. En una tarde de desarrollo eso son
+     * varios dólares en reprocesar lo mismo.
+     *
+     * Para el volcado inicial usamos las reglas de severidad.js: la
+     * descripción queda menos pulida, pero el tipo y la gravedad son
+     * correctos. La IA se reserva para lo que llega después, que es donde
+     * aporta de verdad.
+     */
+    const esBackfill = primerCiclo && aPublicar.length > 20;
+    const config = esBackfill ? { ...CONFIG.ia, aiEnabled: false } : CONFIG.ia;
+
+    if (esBackfill) {
+      console.log(
+        `[ciclo] volcado inicial de ${aPublicar.length} partes sin IA (ahorro ~$0.25)`
+      );
+    }
+
     // La IA procesa en lotes de 8 para no truncar la respuesta JSON
     const clasificados = [];
     for (let i = 0; i < aPublicar.length; i += 8) {
       const lote = aPublicar.slice(i, i + 8);
-      clasificados.push(...(await clasificar(lote, CONFIG.ia)));
+      clasificados.push(...(await clasificar(lote, config)));
     }
+
+    primerCiclo = false;
 
     let publicados = 0;
     for (const ev of clasificados) {

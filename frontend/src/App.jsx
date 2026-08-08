@@ -231,6 +231,7 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
   const ubicacion = useUbicacion();
   const [avisoCercania, setAvisoCercania] = useState(() => leerAvisoCercania());
   const ultimoAvisoRef = useRef(0);
+  const revisarRef = useRef(true);
 
   const metadata = useMemo(() => (usuario ? { nombre: usuario } : undefined), [usuario]);
   const opciones = useMemo(
@@ -411,7 +412,32 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
     ubicacion.iniciar();
     setAvisoCercania(true);
     guardarAvisoCercania(true);
+    revisarRef.current = true; // revisar lo que ya está en pantalla
   }
+
+  /* Al encender el aviso, o al llegar la primera posición, comprobamos lo que
+     YA está en el mapa. Sin esto, un incendio a dos cuadras que ocurrió antes
+     de abrir la app no avisa nunca: el aviso solo miraba lo que entraba
+     después, y quien acaba de abrir Radar no sabe eso. */
+  useEffect(() => {
+    if (!avisoCercania || !ubicacion.pos || !revisarRef.current) return;
+    revisarRef.current = false;
+
+    let masCerca = null;
+    for (const e of eventos) {
+      if (e.estado !== 'atendiendo') continue; // solo lo que sigue activo
+      const c = coordsDe(e);
+      if (!c) continue;
+      const m = distancia(ubicacion.pos[0], ubicacion.pos[1], c[0], c[1]);
+      if (m > RADIO_CERCANIA) continue;
+      if (!masCerca || m < masCerca.metros) masCerca = { evento: e, metros: m };
+    }
+
+    if (masCerca) {
+      ultimoAvisoRef.current = Date.now();
+      setAviso({ evento: masCerca.evento, extras: 0, metros: masCerca.metros });
+    }
+  }, [avisoCercania, ubicacion.pos, eventos]);
 
   function cambiarTema(t) {
     setTema(t);
