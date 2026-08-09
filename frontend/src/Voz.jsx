@@ -139,6 +139,19 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
     }
   }, []);
 
+  /* Cerrar el panel: calla la locucion, corta el reconocimiento si sigue
+     activo y limpia el texto. Sin esto la respuesta se quedaba tapando el
+     mapa hasta la siguiente consulta. */
+  const cerrar = useCallback(() => {
+    window.speechSynthesis?.cancel();
+    recRef.current?.abort?.();
+    finalRef.current = '';
+    setTranscripcion('');
+    setRespuesta('');
+    setError(null);
+    setEstado('listo');
+  }, []);
+
   const escuchar = useCallback(() => {
     desbloquearVoz();
 
@@ -224,8 +237,20 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
         <div
           className="absolute z-[900] left-3 right-3 bottom-[14rem] lg:left-auto lg:right-4
                      lg:w-[340px] rounded-2xl border border-white/12 bg-[#0B1120]/95
-                     backdrop-blur-md shadow-2xl shadow-black/60 px-4 py-3"
+                     backdrop-blur-md shadow-2xl shadow-black/60 pl-4 pr-11 py-3"
         >
+          <button
+            onClick={cerrar}
+            aria-label="Cerrar respuesta"
+            className="absolute top-2 right-2 w-8 h-8 rounded-full grid place-items-center
+                       text-[#7C8AA0] hover:text-slate-100 hover:bg-white/10 transition"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                 strokeLinecap="round" className="w-4 h-4">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+
           {transcripcion && (
             <p className="text-[12px] text-[#7C8AA0] leading-snug mb-1.5">
               “{transcripcion}”
@@ -256,6 +281,15 @@ export default function Voz({ eventos, posicion, contexto, onMencionar }) {
             <p className="dato text-[9px] text-[#4A5568] mt-1.5">
               toca el micrófono para callar
             </p>
+          )}
+
+          {respuesta && !hablando && (
+            <button
+              onClick={cerrar}
+              className="dato text-[9px] text-[#4A5568] hover:text-slate-300 mt-2 transition"
+            >
+              volver al mapa
+            </button>
           )}
         </div>
       )}
