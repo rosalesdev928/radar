@@ -512,6 +512,14 @@ function Vista({ usuario, onSalir, instalable, onInstalar }) {
       {ultimo && (
         <span className="dato text-[9px] text-[#4A5568]">último parte {ultimo}</span>
       )}
+      <a
+        href="https://portafolioleo.vercel.app/#inicio"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="dato text-[9px] text-[#4A5568] hover:text-[#FF3B30] transition-colors"
+      >
+        hecho por <span className="text-[#7C8AA0] hover:text-[#FF3B30]">ROSALESDEV928</span>
+      </a>
     </div>
   );
 
